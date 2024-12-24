@@ -1,159 +1,47 @@
-# see https://golangci-lint.run/usage/configuration/
-linters-settings:
-  custom:
-    # aliaslint breaks with go 1.21
-#    aliaslint:
-#      path: aliaslint.so
-#      description: Checks that import aliases are consistent across the module.
-#      original-url: gitlab.com/crusoeenergy/tools
-  errcheck:
-    # report about not checking of errors in type assertions: `a := b.(MyStruct)`;
-    # default is false: such cases aren't reported by default.
-    check-type-assertions: true
+run:
+  timeout: 5m
+  allow-parallel-runners: true
 
-    # report about assignment of errors to blank identifier: `num, _ := strconv.Atoi(numStr)`;
-    # default is false: such cases aren't reported by default.
-    check-blank: true
-
-    # path to a file containing a list of functions to exclude from checking
-    # see https://github.com/kisielk/errcheck#excluding-functions for details
-    # exclude: /path/to/file.txt
-  gci:
-    # put imports beginning with prefix after 3rd-party packages;
-    # only support one prefix
-    # if not set, use goimports.local-prefixes
-    local-prefixes: gitlab.com/crusoeenergy
-  govet:
-    check-shadowing: true
-  goimports:
-    local-prefixes: gitlab.com/crusoeenergy
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - experimental
-      - opinionated
-      - performance
-      - style
-    disabled-checks:
-      - commentedOutCode
-  whitespace:
-    multi-if: true # Enforces newlines (or comments) after every multi-line if statement
-    multi-func: false # Enforces newlines (or comments) after every multi-line function signature
-  gosec:
-    global:
-      audit: enabled # Run extra checks that might be "nosy"
-
+issues:
+  # don't skip warning about doc comments
+  # don't exclude the default set of lint
+  exclude-use-default: false
+  # restore some of the defaults
+  # (fill in the rest as needed)
+  exclude-rules:
+    - path: "api/*"
+      linters:
+        - lll
+    - path: "internal/*"
+      linters:
+        - dupl
+        - lll
 linters:
   disable-all: true
   enable:
-#    - aliaslint # breaks with go 1.21
-    - asasalint
-    - asciicheck
-    - bidichk
-    - bodyclose
-    - containedctx
-    - contextcheck
-    - cyclop
-    - deadcode
-    - decorder
-#    - depguard # Duplicative with CODEOWNERS restrictions on go.mod files
-    - dogsled
     - dupl
-    - durationcheck
-    - errchkjson
     - errcheck
-    - errorlint
-    - execinquery
-    - exhaustive
-    # - exhaustivestruct
-    #- exhaustruct
-    - exportloopref
-    - forbidigo
-    - forcetypeassert
-    - funlen
-    - gci
-    - gochecknoinits
-    - gochecknoglobals
-    - gocognit
+    - copyloopvar
+    - ginkgolinter
     - goconst
-    - gocritic
     - gocyclo
-    # - godox
-    - godot
-    - goerr113
     - gofmt
-    - gofumpt
-    - goheader
     - goimports
-    # - golint
-    - gomnd
-    - gomoddirectives
-    - gomodguard
-    - goprintffuncname
-    - gosec
     - gosimple
     - govet
-    - grouper
-    - ifshort
-    # - importas
     - ineffassign
-    - ireturn
     - lll
-    - maintidx
-    - makezero
     - misspell
     - nakedret
-    - nestif
-    - nilerr
-    - nilnil
-    - nlreturn
-    - noctx
-    - nolintlint
-    - nonamedreturns
-    - nosnakecase
-    - nosprintfhostport
-    - paralleltest
     - prealloc
-    - predeclared
-    - promlinter
     - revive
-    #- rowserrcheck
-    #- sqlclosecheck
     - staticcheck
-    #- structcheck
-    - stylecheck
-    - tagliatelle
-    - tenv
-    - testpackage
-    - thelper
-    - tparallel
     - typecheck
     - unconvert
-    - unparam # this one is useful to check sometimes
+    - unparam
     - unused
-    - varcheck
-    - varnamelen
-    #- wastedassign
-    - whitespace
-    - wrapcheck
-    # - wsl
 
-issues:
-  # exclude:
-  # Excluding configuration per-path, per-linter, per-text and per-source
-  exclude-rules:
-    # Exclude lll issues for long lines with go:generate
-    - linters:
-        - lll
-      source: "^//go:generate "
-
-run:
-  # include test  files or not
-  tests: false
-
-# golangci.com configuration
-# https://github.com/golangci/golangci/wiki/Configuration
-service:
-  golangci-lint-version: 1.55.2 # use the fixed version to not introduce new linters unexpectedly
-  prepare:
-    - echo "here I can run custom commands, but no preparation needed for this repo"
+linters-settings:
+  revive:
+    rules:
+      - name: comment-spacings

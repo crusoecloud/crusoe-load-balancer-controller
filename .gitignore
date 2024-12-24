@@ -1,11 +1,27 @@
-dist/
-.DS_Store
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/*
+Dockerfile.cross
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Go workspace file
+go.work
+
+# Kubernetes Generated files - skip generated files, except for vendored files
+!vendor/**/zz_generated.*
+
+# editor and IDE paraphernalia
+.idea
+.vscode
 *.swp
-coverage.out
-aliaslint.so
-gokart_result.json
-golangci-lint.json
-tests.xml
-coverage.xml
-.vscode/*
-.idea/*
+*.swo
+*~
