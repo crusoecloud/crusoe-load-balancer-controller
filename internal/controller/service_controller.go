@@ -24,6 +24,8 @@ import (
 	"net/http"
 	"time"
 
+	utils "lb_controller/internal/utils"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -125,7 +127,7 @@ func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	case "update":
 		logger.Info("Handling Update operation for Service", "name", req.Name, "namespace", req.Namespace)
-		// Future: Implement update logic here
+		return r.handleUpdate(ctx, svc)
 
 	default:
 		logger.Info("Unrecognized operation for Service", "operation", operation, "name", req.Name, "namespace", req.Namespace)
@@ -139,19 +141,9 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 	logger := log.FromContext(ctx)
 
 	// Define the NodePort Service name
-	// https://stackoverflow.com/a/59917275, Service names are restricted to a maximum of 63 characters
-	const maxNameLength = 63
-	const suffix = "-nodeport"
+	nodePortServiceName := utils.GenerateNodePortServiceName(svc.Name)
 
-	originalName := svc.Name
-
-	if len(originalName)+len(suffix) > maxNameLength {
-		originalName = originalName[:maxNameLength-len(suffix)]
-	}
-
-	nodePortServiceName := originalName + suffix
-
-	// Check if the NodePort Service already exists
+	// Check if NodePort Service already exists
 	existingNodePortService := &corev1.Service{}
 	err := r.Client.Get(ctx, client.ObjectKey{
 		Namespace: svc.Namespace,
@@ -286,6 +278,84 @@ func (r *ServiceReconciler) handleDelete(ctx context.Context, svc *corev1.Servic
 
 	logger.Info("Successfully deleted resource via mock API", "service", svc.Name)
 	return nil
+}
+
+// handleUpdate handles updates to a Service of type LoadBalancer
+func (r *ServiceReconciler) handleUpdate(ctx context.Context, svc *corev1.Service) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	// Define the NodePort Service name
+	nodePortServiceName := utils.GenerateNodePortServiceName(svc.Name)
+
+	// Fetch the existing NodePort service
+	existingNodePortService := &corev1.Service{}
+	err := r.Client.Get(ctx, client.ObjectKey{
+		Namespace: svc.Namespace,
+		Name:      nodePortServiceName,
+	}, existingNodePortService)
+	if err != nil {
+		if client.IgnoreNotFound(err) != nil {
+			logger.Error(err, "Failed to fetch NodePort Service", "nodePortService", nodePortServiceName)
+			return ctrl.Result{}, err
+		}
+		// NodePort Service doesn't exist, create it
+		logger.Info("NodePort Service not found; creating a new one", "nodePortService", nodePortServiceName)
+		return r.handleCreate(ctx, svc)
+	}
+
+	// Check for differences and update the NodePort service
+	updated := false
+	if !utils.EqualPorts(existingNodePortService.Spec.Ports, svc.Spec.Ports) {
+		logger.Info("Updating NodePort Service ports", "nodePortService", nodePortServiceName)
+		existingNodePortService.Spec.Ports = utils.CopyPortsFromService(svc)
+		updated = true
+	}
+
+	if svc.Spec.Selector != nil && !utils.EqualSelectors(existingNodePortService.Spec.Selector, svc.Spec.Selector) {
+		logger.Info("Updating NodePort Service selector", "nodePortService", nodePortServiceName)
+		existingNodePortService.Spec.Selector = svc.Spec.Selector
+		updated = true
+	}
+
+	if updated {
+		// Update the NodePort service in the cluster
+		err = r.Client.Update(ctx, existingNodePortService)
+		if err != nil {
+			logger.Error(err, "Failed to update NodePort Service", "nodePortService", nodePortServiceName)
+			return ctrl.Result{}, err
+		}
+		logger.Info("Successfully updated NodePort Service", "nodePortService", nodePortServiceName)
+	} else {
+		logger.Info("No updates needed for NodePort Service", "nodePortService", nodePortServiceName)
+	}
+
+	// actually make the update by calling the external API
+	apiPayload := map[string]interface{}{
+		"name":      svc.Name,
+		"namespace": svc.Namespace,
+		"ports":     svc.Spec.Ports,
+	}
+	payloadBytes, _ := json.Marshal(apiPayload)
+	reqURL := "https://jsonplaceholder.typicode.com/posts/" + svc.Name
+
+	httpReq, _ := http.NewRequest("PUT", reqURL, bytes.NewBuffer(payloadBytes))
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		logger.Error(err, "Failed to update load balancer via API", "service", svc.Name)
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+		logger.Error(nil, "Unexpected response from API", "status", resp.StatusCode, "service", svc.Name)
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	}
+
+	logger.Info("Successfully updated load balancer via API", "service", svc.Name)
+	return ctrl.Result{}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
