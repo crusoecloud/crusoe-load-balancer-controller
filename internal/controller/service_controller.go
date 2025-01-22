@@ -20,12 +20,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
 	utils "lb_controller/internal/utils"
 
+	crusoeapi "github.com/crusoecloud/client-go/swagger/v1alpha5"
+	swagger "github.com/crusoecloud/client-go/swagger/v1alpha5"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -39,7 +40,9 @@ import (
 // ServiceReconciler reconciles a Service object
 type ServiceReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme       *runtime.Scheme
+	CrusoeClient *crusoeapi.APIClient
+	HostInstance *crusoeapi.InstanceV1Alpha5
 }
 
 // +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
@@ -82,7 +85,7 @@ func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		// Perform cleanup and remove the finalizer
 		if controllerutil.ContainsFinalizer(svc, finalizer) {
 			logger.Info("Handling Delete operation for Service", "name", req.Name, "namespace", req.Namespace)
-			if err := r.handleDelete(ctx, svc); err != nil {
+			if _, err := r.handleDelete(ctx, svc); err != nil {
 				logger.Error(err, "Failed to handle delete operation", "name", req.Name, "namespace", req.Namespace)
 				return ctrl.Result{}, err
 			}
@@ -176,9 +179,9 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 		}
 
 		// Honor explicitly specified nodePort values
-		if port.NodePort != 0 {
-			newPort.NodePort = port.NodePort
-		}
+		// if port.NodePort != 0 {
+		// 	newPort.NodePort = port.NodePort
+		// }
 
 		ports = append(ports, newPort)
 	}
@@ -216,68 +219,80 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 
 	logger.Info("Successfully created matching NodePort Service", "nodePortService", nodePortServiceName)
 
-	apiPayload := map[string]interface{}{
-		"name":      svc.Name,
-		"namespace": svc.Namespace,
-		"ports":     svc.Spec.Ports,
+	listenPortsAndBackends := r.parseListenPortsAndBackends(ctx, svc, logger)
+
+	healthCheckOptions := ParseHealthCheckOptionsFromAnnotations(svc.Annotations)
+
+	// Prepare payload for the API call
+	apiPayload := crusoeapi.ExternalLoadBalancerPostRequest{
+		VpcId:                  svc.Annotations["crusoe.com/vpc-id"], // Replace with actual VPC ID logic
+		Name:                   svc.Name,
+		Location:               r.HostInstance.Location,      // TODO: does not work when using r.HostInstance.Location
+		Protocol:               "LOAD_BALANCER_PROTOCOL_TCP", // only TCP supported currently
+		ListenPortsAndBackends: listenPortsAndBackends,
+		HealthCheckOptions:     healthCheckOptions,
 	}
-	payloadBytes, _ := json.Marshal(apiPayload)
-	// temporarily using this dummy url to mock out load balancer api call
-	// check it out: https://jsonplaceholder.typicode.com/
-	reqURL := "https://jsonplaceholder.typicode.com/posts"
 
-	// Make HTTP request to external API
-	httpReq, _ := http.NewRequest("POST", reqURL, bytes.NewBuffer(payloadBytes))
-	httpReq.Header.Set("Content-Type", "application/json")
+	logger.Info("ABOUT TO HIT", "api payload", apiPayload)
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(httpReq)
+	// Call the actual API
+	// TODO: does not work when using r.HostInstance.ProjectId
+	op_resp, http_resp, err := r.CrusoeClient.ExternalLoadBalancersApi.CreateExternalLoadBalancer(ctx, apiPayload, r.HostInstance.ProjectId)
 	if err != nil {
 		logger.Error(err, "Failed to create load balancer via API")
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		logger.Error(nil, "Unexpected response from API", "status", resp.StatusCode)
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		return ctrl.Result{}, nil
 	}
 
-	logger.Info("Successfully created load balancer", "service", svc.Name)
+	logger.Info("GOT THIS BACK", "http_resp", http_resp)
+
+	if http_resp.StatusCode != http.StatusOK && http_resp.StatusCode != http.StatusCreated {
+		logger.Error(nil, "Unexpected response from API", "status", http_resp.StatusCode)
+		return ctrl.Result{}, nil
+	}
+
+	loadBalancer, err := OpResultToItem[swagger.ExternalLoadBalancer](op_resp.Operation.Result)
+
+	// Store the Load Balancer ID in the Service annotations
+	if svc.Annotations == nil {
+		svc.Annotations = make(map[string]string)
+	}
+	svc.Annotations["crusoe.ai/load-balancer-id"] = loadBalancer.Id
+
+	// Update the Service object in the Kubernetes API
+	err = r.Client.Update(ctx, svc)
+	if err != nil {
+		logger.Error(err, "Failed to update Service with Load Balancer ID", "service", svc.Name)
+		return ctrl.Result{}, err
+	}
+
+	logger.Info("Stored Load Balancer ID in Service annotations", "service", svc.Name, "loadBalancerID", loadBalancer.Id)
 	return ctrl.Result{}, nil
 }
 
 // handleDelete handles cleanup logic for a Service marked for deletion
-func (r *ServiceReconciler) handleDelete(ctx context.Context, svc *corev1.Service) error {
+func (r *ServiceReconciler) handleDelete(ctx context.Context, svc *corev1.Service) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// Mock API URL for deletion
-	reqURL := "https://jsonplaceholder.typicode.com/posts/" + svc.Name
+	loadBalancerID := svc.Annotations["crusoe.ai/load-balancer-id"]
 
-	// Create delete request
-	httpReq, err := http.NewRequest("DELETE", reqURL, nil)
+	// Call the API to delete the load balancer
+	_, httpResp, err := r.CrusoeClient.ExternalLoadBalancersApi.DeleteExternalLoadBalancer(ctx, r.HostInstance.ProjectId, loadBalancerID)
 	if err != nil {
-		logger.Error(err, "Failed to create DELETE request", "service", svc.Name)
-		return err
+		logger.Error(err, "Failed to delete load balancer via API", "service", svc.Name, "loadBalancerID", loadBalancerID)
+		// Retry the operation
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
-	// TODO: We would probably add polling logic here
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		logger.Error(err, "Failed to delete resource via mock API", "service", svc.Name)
-		return err
-	}
-	defer resp.Body.Close()
-
-	// Check the response status
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		logger.Error(nil, "Unexpected response from mock API", "status", resp.StatusCode, "service", svc.Name)
-		return fmt.Errorf("unexpected response from mock API: %d", resp.StatusCode)
+	// Check the HTTP response status
+	if httpResp.StatusCode != http.StatusOK && httpResp.StatusCode != http.StatusNoContent {
+		logger.Error(nil, "Unexpected response from API during deletion", "status", httpResp.StatusCode, "service", svc.Name, "loadBalancerID", loadBalancerID)
+		// Retry on unexpected status
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
-	logger.Info("Successfully deleted resource via mock API", "service", svc.Name)
-	return nil
+	logger.Info("Successfully deleted load balancer via API", "service", svc.Name, "loadBalancerID", loadBalancerID)
+	return ctrl.Result{}, nil
+
 }
 
 // handleUpdate handles updates to a Service of type LoadBalancer

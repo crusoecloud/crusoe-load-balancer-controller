@@ -17,12 +17,17 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"os"
+	"os/signal"
+	"sync"
+	"syscall"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
+
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -43,6 +48,36 @@ var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
 )
+
+const (
+	CrusoeAPIEndpointFlag = "crusoe-api-endpoint"
+	CrusoeAccessKeyFlag   = "crusoe-elb-access-key"
+	CrusoeSecretKeyFlag   = "crusoe-elb-secret-key" //nolint:gosec // false positive, this is a flag name
+	CrusoeProjectIDFlag   = "crusoe-project-id"
+)
+
+func interruptHandler() (*sync.WaitGroup, context.Context) {
+	// Handle interrupts
+	interrupt := make(chan os.Signal, 1)
+	signal.Notify(interrupt, os.Interrupt)
+	signal.Notify(interrupt, syscall.SIGTERM)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	go func() {
+		select {
+		case <-ctx.Done():
+			return
+
+		case <-interrupt:
+			wg.Done()
+			cancel()
+		}
+	}()
+
+	return &wg, ctx
+}
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -140,16 +175,25 @@ func main() {
 		os.Exit(1)
 	}
 
+
+	hostInstance, crusoeClient, err := controller.GetHostInstance(context.Background())
+
+	if err != nil {
+		setupLog.Error(err, "unable to get host instance", "controller", "Service")
+	}
+
 	if err = (&controller.ServiceReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:       mgr.GetClient(),
+		Scheme:       mgr.GetScheme(),
+		CrusoeClient: crusoeClient,
+		HostInstance: hostInstance, // TODO add hostInstance
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Service")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder
 
-	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
+	if err := mgr.AddHealthzCheck("health", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")
 		os.Exit(1)
 	}

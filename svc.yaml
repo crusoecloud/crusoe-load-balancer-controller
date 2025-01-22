@@ -26,6 +26,8 @@ kind: Service
 metadata:
   name: svc
   namespace: default
+  annotations:
+    crusoe.com/vpc-id: "406e04ef-164c-4746-8ede-496a46400278" # Replace with actual VPC ID
 spec:
   selector:
     app: app
