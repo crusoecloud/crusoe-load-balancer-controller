@@ -17,9 +17,7 @@ limitations under the License.
 package controller
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"net/http"
 	"time"
 
@@ -225,7 +223,7 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 
 	// Prepare payload for the API call
 	apiPayload := crusoeapi.ExternalLoadBalancerPostRequest{
-		VpcId:                  svc.Annotations["crusoe.com/vpc-id"], // Replace with actual VPC ID logic
+		VpcId:                  svc.Annotations["crusoe.com/vpc-id"], //"a0f91cb2-fdba-45c8-b7e0-19d01738221a", // dev: "8aeeb0f9-94fd-4a29-931c-30403194c526", //svc.Annotations["crusoe.com/vpc-id"], // Replace with actual VPC ID logic
 		Name:                   svc.Name,
 		Location:               r.HostInstance.Location,      // TODO: does not work when using r.HostInstance.Location
 		Protocol:               "LOAD_BALANCER_PROTOCOL_TCP", // only TCP supported currently
@@ -233,24 +231,29 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 		HealthCheckOptions:     healthCheckOptions,
 	}
 
-	logger.Info("ABOUT TO HIT", "api payload", apiPayload)
-
-	// Call the actual API
-	// TODO: does not work when using r.HostInstance.ProjectId
 	op_resp, http_resp, err := r.CrusoeClient.ExternalLoadBalancersApi.CreateExternalLoadBalancer(ctx, apiPayload, r.HostInstance.ProjectId)
 	if err != nil {
 		logger.Error(err, "Failed to create load balancer via API")
 		return ctrl.Result{}, nil
 	}
 
-	logger.Info("GOT THIS BACK", "http_resp", http_resp)
-
 	if http_resp.StatusCode != http.StatusOK && http_resp.StatusCode != http.StatusCreated {
 		logger.Error(nil, "Unexpected response from API", "status", http_resp.StatusCode)
 		return ctrl.Result{}, nil
 	}
 
-	loadBalancer, err := OpResultToItem[swagger.ExternalLoadBalancer](op_resp.Operation.Result)
+	op, err := waitForOperation(ctx, "Creating ELB ...",
+		op_resp.Operation, r.HostInstance.ProjectId, r.CrusoeClient.ExternalLoadBalancerOperationsApi.GetExternalLoadBalancerOperation)
+	if err != nil || op.State != string(OpSuccess) {
+		return ctrl.Result{}, err
+	}
+
+	loadBalancer, err := OpResultToItem[swagger.ExternalLoadBalancer](op.Result)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	logger.Info("GOT THIS BACK", "http_resp", op.Result)
 
 	// Store the Load Balancer ID in the Service annotations
 	if svc.Annotations == nil {
@@ -310,6 +313,7 @@ func (r *ServiceReconciler) handleUpdate(ctx context.Context, svc *corev1.Servic
 	}, existingNodePortService)
 	if err != nil {
 		if client.IgnoreNotFound(err) != nil {
+			// Unexpected error
 			logger.Error(err, "Failed to fetch NodePort Service", "nodePortService", nodePortServiceName)
 			return ctrl.Result{}, err
 		}
@@ -318,22 +322,31 @@ func (r *ServiceReconciler) handleUpdate(ctx context.Context, svc *corev1.Servic
 		return r.handleCreate(ctx, svc)
 	}
 
-	// Check for differences and update the NodePort service
+	// Track if we need to update the NodePort service
 	updated := false
+
+	// Compare and update ports if changed
 	if !utils.EqualPorts(existingNodePortService.Spec.Ports, svc.Spec.Ports) {
 		logger.Info("Updating NodePort Service ports", "nodePortService", nodePortServiceName)
-		existingNodePortService.Spec.Ports = utils.CopyPortsFromService(svc)
+
+		// Copy ports from svc, then clear NodePort to let K8s assign a free one
+		newPorts := utils.CopyPortsFromService(svc)
+		for i := range newPorts {
+			newPorts[i].NodePort = 0 // Clear the NodePort to avoid collisions
+		}
+		existingNodePortService.Spec.Ports = newPorts
 		updated = true
 	}
 
+	// Compare and update selectors if changed
 	if svc.Spec.Selector != nil && !utils.EqualSelectors(existingNodePortService.Spec.Selector, svc.Spec.Selector) {
 		logger.Info("Updating NodePort Service selector", "nodePortService", nodePortServiceName)
 		existingNodePortService.Spec.Selector = svc.Spec.Selector
 		updated = true
 	}
 
+	// Apply the update if changes were made
 	if updated {
-		// Update the NodePort service in the cluster
 		err = r.Client.Update(ctx, existingNodePortService)
 		if err != nil {
 			logger.Error(err, "Failed to update NodePort Service", "nodePortService", nodePortServiceName)
@@ -344,32 +357,32 @@ func (r *ServiceReconciler) handleUpdate(ctx context.Context, svc *corev1.Servic
 		logger.Info("No updates needed for NodePort Service", "nodePortService", nodePortServiceName)
 	}
 
-	// actually make the update by calling the external API
-	apiPayload := map[string]interface{}{
-		"name":      svc.Name,
-		"namespace": svc.Namespace,
-		"ports":     svc.Spec.Ports,
-	}
-	payloadBytes, _ := json.Marshal(apiPayload)
-	reqURL := "https://jsonplaceholder.typicode.com/posts/" + svc.Name
+	// Example external API call to update load balancer
+	// apiPayload := map[string]interface{}{
+	// 	"name":      svc.Name,
+	// 	"namespace": svc.Namespace,
+	// 	"ports":     svc.Spec.Ports,
+	// }
+	// payloadBytes, _ := json.Marshal(apiPayload)
+	// reqURL := "https://jsonplaceholder.typicode.com/posts/" + svc.Name
 
-	httpReq, _ := http.NewRequest("PUT", reqURL, bytes.NewBuffer(payloadBytes))
-	httpReq.Header.Set("Content-Type", "application/json")
+	// httpReq, _ := http.NewRequest("PUT", reqURL, bytes.NewBuffer(payloadBytes))
+	// httpReq.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		logger.Error(err, "Failed to update load balancer via API", "service", svc.Name)
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-	}
-	defer resp.Body.Close()
+	// client := &http.Client{Timeout: 10 * time.Second}
+	// resp, err := client.Do(httpReq)
+	// if err != nil {
+	// 	logger.Error(err, "Failed to update load balancer via API", "service", svc.Name)
+	// 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	// }
+	// defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
-		logger.Error(nil, "Unexpected response from API", "status", resp.StatusCode, "service", svc.Name)
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-	}
+	// if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
+	// 	logger.Error(nil, "Unexpected response from API", "status", resp.StatusCode, "service", svc.Name)
+	// 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+	// }
 
-	logger.Info("Successfully updated load balancer via API", "service", svc.Name)
+	// logger.Info("Successfully updated load balancer via API", "service", svc.Name)
 	return ctrl.Result{}, nil
 }
 
