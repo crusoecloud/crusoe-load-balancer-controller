@@ -49,13 +49,6 @@ var (
 	setupLog = ctrl.Log.WithName("setup")
 )
 
-const (
-	CrusoeAPIEndpointFlag = "crusoe-api-endpoint"
-	CrusoeAccessKeyFlag   = "crusoe-elb-access-key"
-	CrusoeSecretKeyFlag   = "crusoe-elb-secret-key" //nolint:gosec // false positive, this is a flag name
-	CrusoeProjectIDFlag   = "crusoe-project-id"
-)
-
 func interruptHandler() (*sync.WaitGroup, context.Context) {
 	// Handle interrupts
 	interrupt := make(chan os.Signal, 1)

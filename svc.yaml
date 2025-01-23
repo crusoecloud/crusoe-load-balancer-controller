@@ -33,6 +33,6 @@ spec:
     app: app
   ports:
   - name: http
-    port: 80
+    port: 81
     targetPort: 8080
   type: LoadBalancer

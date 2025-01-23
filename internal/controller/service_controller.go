@@ -242,7 +242,7 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 		return ctrl.Result{}, nil
 	}
 
-	op, err := waitForOperation(ctx, "Creating ELB ...",
+	op, err := utils.WaitForOperation(ctx, "Creating ELB ...",
 		op_resp.Operation, r.HostInstance.ProjectId, r.CrusoeClient.ExternalLoadBalancerOperationsApi.GetExternalLoadBalancerOperation)
 	if err != nil || op.State != string(OpSuccess) {
 		return ctrl.Result{}, err
@@ -302,89 +302,22 @@ func (r *ServiceReconciler) handleDelete(ctx context.Context, svc *corev1.Servic
 func (r *ServiceReconciler) handleUpdate(ctx context.Context, svc *corev1.Service) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// Define the NodePort Service name
-	nodePortServiceName := utils.GenerateNodePortServiceName(svc.Name)
-
-	// Fetch the existing NodePort service
-	existingNodePortService := &corev1.Service{}
-	err := r.Client.Get(ctx, client.ObjectKey{
-		Namespace: svc.Namespace,
-		Name:      nodePortServiceName,
-	}, existingNodePortService)
-	if err != nil {
-		if client.IgnoreNotFound(err) != nil {
-			// Unexpected error
-			logger.Error(err, "Failed to fetch NodePort Service", "nodePortService", nodePortServiceName)
-			return ctrl.Result{}, err
-		}
-		// NodePort Service doesn't exist, create it
-		logger.Info("NodePort Service not found; creating a new one", "nodePortService", nodePortServiceName)
-		return r.handleCreate(ctx, svc)
+	// 1. Ensure NodePort Service is up to date
+	_, nodePortErr := r.updateNodePortService(ctx, svc, logger)
+	if nodePortErr != nil {
+		return ctrl.Result{}, nodePortErr
 	}
 
-	// Track if we need to update the NodePort service
-	updated := false
-
-	// Compare and update ports if changed
-	if !utils.EqualPorts(existingNodePortService.Spec.Ports, svc.Spec.Ports) {
-		logger.Info("Updating NodePort Service ports", "nodePortService", nodePortServiceName)
-
-		// Copy ports from svc, then clear NodePort to let K8s assign a free one
-		newPorts := utils.CopyPortsFromService(svc)
-		for i := range newPorts {
-			newPorts[i].NodePort = 0 // Clear the NodePort to avoid collisions
-		}
-		existingNodePortService.Spec.Ports = newPorts
-		updated = true
+	// 2. Update External LB if needed
+	if err := r.updateLoadBalancer(ctx, svc, logger); err != nil {
+		// Could choose to requeue on errors
+		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
 	}
 
-	// Compare and update selectors if changed
-	if svc.Spec.Selector != nil && !utils.EqualSelectors(existingNodePortService.Spec.Selector, svc.Spec.Selector) {
-		logger.Info("Updating NodePort Service selector", "nodePortService", nodePortServiceName)
-		existingNodePortService.Spec.Selector = svc.Spec.Selector
-		updated = true
-	}
-
-	// Apply the update if changes were made
-	if updated {
-		err = r.Client.Update(ctx, existingNodePortService)
-		if err != nil {
-			logger.Error(err, "Failed to update NodePort Service", "nodePortService", nodePortServiceName)
-			return ctrl.Result{}, err
-		}
-		logger.Info("Successfully updated NodePort Service", "nodePortService", nodePortServiceName)
-	} else {
-		logger.Info("No updates needed for NodePort Service", "nodePortService", nodePortServiceName)
-	}
-
-	// Example external API call to update load balancer
-	// apiPayload := map[string]interface{}{
-	// 	"name":      svc.Name,
-	// 	"namespace": svc.Namespace,
-	// 	"ports":     svc.Spec.Ports,
-	// }
-	// payloadBytes, _ := json.Marshal(apiPayload)
-	// reqURL := "https://jsonplaceholder.typicode.com/posts/" + svc.Name
-
-	// httpReq, _ := http.NewRequest("PUT", reqURL, bytes.NewBuffer(payloadBytes))
-	// httpReq.Header.Set("Content-Type", "application/json")
-
-	// client := &http.Client{Timeout: 10 * time.Second}
-	// resp, err := client.Do(httpReq)
-	// if err != nil {
-	// 	logger.Error(err, "Failed to update load balancer via API", "service", svc.Name)
-	// 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-	// }
-	// defer resp.Body.Close()
-
-	// if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusAccepted {
-	// 	logger.Error(nil, "Unexpected response from API", "status", resp.StatusCode, "service", svc.Name)
-	// 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
-	// }
-
-	// logger.Info("Successfully updated load balancer via API", "service", svc.Name)
+	logger.Info("Successfully handled update for ELB", "service", svc.Name)
 	return ctrl.Result{}, nil
 }
+
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
