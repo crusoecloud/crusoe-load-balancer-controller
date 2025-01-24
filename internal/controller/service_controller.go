@@ -228,9 +228,9 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 
 	// Prepare payload for the API call
 	apiPayload := crusoeapi.ExternalLoadBalancerPostRequest{
-		VpcId:                  svc.Annotations["crusoe.com/vpc-id"], //"a0f91cb2-fdba-45c8-b7e0-19d01738221a", // dev: "8aeeb0f9-94fd-4a29-931c-30403194c526", //svc.Annotations["crusoe.com/vpc-id"], // Replace with actual VPC ID logic
+		VpcId:                  svc.Annotations["crusoe.com/vpc-id"],
 		Name:                   svc.Name,
-		Location:               r.HostInstance.Location,      // TODO: does not work when using r.HostInstance.Location
+		Location:               r.HostInstance.Location,
 		Protocol:               "LOAD_BALANCER_PROTOCOL_TCP", // only TCP supported currently
 		ListenPortsAndBackends: listenPortsAndBackends,
 		HealthCheckOptions:     healthCheckOptions,
