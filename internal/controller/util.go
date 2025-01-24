@@ -32,6 +32,7 @@ const (
 	projectIDLabelKey                          = "crusoe.ai/project.id"
 	instanceIDEnvKey                           = "CRUSOE_INSTANCE_ID"
 	instanceIDLabelKey                         = "crusoe.ai/instance.id"
+	loadbalancerIDLabelKey                     = "crusoe.ai/load-balancer-id"
 	vmIDFilePath                               = "/sys/class/dmi/id/product_uuid"
 	NodeNameFlag                               = "node-name"
 	OpSuccess                         opStatus = "SUCCEEDED"
@@ -138,7 +139,6 @@ func (r *ServiceReconciler) parseListenPortsAndBackends(ctx context.Context, svc
 
 //nolint:cyclop // function is already fairly clean
 func GetHostInstance(ctx context.Context) (*crusoeapi.InstanceV1Alpha5, *crusoeapi.APIClient, error) {
-	
 
 	crusoeClient := crusoe.NewCrusoeClient(
 		viper.GetString(CrusoeAPIEndpointFlag),
@@ -175,14 +175,10 @@ func GetHostInstance(ctx context.Context) (*crusoeapi.InstanceV1Alpha5, *crusoea
 		}
 
 		// Note: if missing label check what nodepool image is being used
-		// instanceID, ok = hostNode.Labels[instanceIDLabelKey]
-		// if !ok {
-		// 	return nil, nil, errInstanceIDNotFound
-		// }
-
-		// instanceID = "b4309789-2c71-4068-a83f-1c7530d9b170" dev
-		// staging: "2ce20488-67fa-4708-be9d-e33a4f2ee206"
-		instanceID = "2ce20488-67fa-4708-be9d-e33a4f2ee206"
+		instanceID, ok = hostNode.Labels[instanceIDLabelKey]
+		if !ok {
+			return nil, nil, errInstanceIDNotFound
+		}
 
 	}
 
@@ -288,7 +284,7 @@ func (r *ServiceReconciler) updateLoadBalancer(
 	logger logr.Logger,
 ) error {
 
-	loadBalancerID := svc.Annotations["crusoe.ai/load-balancer-id"]
+	loadBalancerID := svc.Annotations[loadbalancerIDLabelKey]
 	listenPortsAndBackends := r.parseListenPortsAndBackends(ctx, svc, logger)
 	healthCheckOptions := ParseHealthCheckOptionsFromAnnotations(svc.Annotations)
 

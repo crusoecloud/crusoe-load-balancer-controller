@@ -176,11 +176,6 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 			TargetPort: port.TargetPort, // Route to the same target port in Pods (e.g., 8080).
 		}
 
-		// Honor explicitly specified nodePort values
-		// if port.NodePort != 0 {
-		// 	newPort.NodePort = port.NodePort
-		// }
-
 		ports = append(ports, newPort)
 	}
 
@@ -223,9 +218,9 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 
 	// Prepare payload for the API call
 	apiPayload := crusoeapi.ExternalLoadBalancerPostRequest{
-		VpcId:                  svc.Annotations["crusoe.com/vpc-id"], //"a0f91cb2-fdba-45c8-b7e0-19d01738221a", // dev: "8aeeb0f9-94fd-4a29-931c-30403194c526", //svc.Annotations["crusoe.com/vpc-id"], // Replace with actual VPC ID logic
+		VpcId:                  svc.Annotations["crusoe.com/vpc-id"],
 		Name:                   svc.Name,
-		Location:               r.HostInstance.Location,      // TODO: does not work when using r.HostInstance.Location
+		Location:               r.HostInstance.Location,
 		Protocol:               "LOAD_BALANCER_PROTOCOL_TCP", // only TCP supported currently
 		ListenPortsAndBackends: listenPortsAndBackends,
 		HealthCheckOptions:     healthCheckOptions,
@@ -245,6 +240,7 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 	op, err := utils.WaitForOperation(ctx, "Creating ELB ...",
 		op_resp.Operation, r.HostInstance.ProjectId, r.CrusoeClient.ExternalLoadBalancerOperationsApi.GetExternalLoadBalancerOperation)
 	if err != nil || op.State != string(OpSuccess) {
+		logger.Error(err, "Failed to create LB Service", "name", svc.Name, "namespace", svc.Namespace)
 		return ctrl.Result{}, err
 	}
 
@@ -259,7 +255,7 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 	if svc.Annotations == nil {
 		svc.Annotations = make(map[string]string)
 	}
-	svc.Annotations["crusoe.ai/load-balancer-id"] = loadBalancer.Id
+	svc.Annotations[loadbalancerIDLabelKey] = loadBalancer.Id
 
 	// Update the Service object in the Kubernetes API
 	err = r.Client.Update(ctx, svc)
@@ -276,21 +272,21 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 func (r *ServiceReconciler) handleDelete(ctx context.Context, svc *corev1.Service) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	loadBalancerID := svc.Annotations["crusoe.ai/load-balancer-id"]
+	loadBalancerID := svc.Annotations[loadbalancerIDLabelKey]
 
 	// Call the API to delete the load balancer
 	_, httpResp, err := r.CrusoeClient.ExternalLoadBalancersApi.DeleteExternalLoadBalancer(ctx, r.HostInstance.ProjectId, loadBalancerID)
 	if err != nil {
 		logger.Error(err, "Failed to delete load balancer via API", "service", svc.Name, "loadBalancerID", loadBalancerID)
 		// Retry the operation
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
 	// Check the HTTP response status
 	if httpResp.StatusCode != http.StatusOK && httpResp.StatusCode != http.StatusNoContent {
 		logger.Error(nil, "Unexpected response from API during deletion", "status", httpResp.StatusCode, "service", svc.Name, "loadBalancerID", loadBalancerID)
 		// Retry on unexpected status
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
 	logger.Info("Successfully deleted load balancer via API", "service", svc.Name, "loadBalancerID", loadBalancerID)
@@ -311,13 +307,12 @@ func (r *ServiceReconciler) handleUpdate(ctx context.Context, svc *corev1.Servic
 	// 2. Update External LB if needed
 	if err := r.updateLoadBalancer(ctx, svc, logger); err != nil {
 		// Could choose to requeue on errors
-		return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 	}
 
 	logger.Info("Successfully handled update for ELB", "service", svc.Name)
 	return ctrl.Result{}, nil
 }
-
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
