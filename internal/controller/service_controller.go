@@ -28,11 +28,16 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+
+	// "sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 // ServiceReconciler reconciles a Service object
@@ -318,19 +323,97 @@ func (r *ServiceReconciler) handleUpdate(ctx context.Context, svc *corev1.Servic
 	return ctrl.Result{}, nil
 }
 
+// // SetupWithManager sets up the controller with the Manager.
+// func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
-// SetupWithManager sets up the controller with the Manager.
+// 	// Define a predicate to filter LoadBalancer services
+// 	loadBalancerPredicate := predicate.NewPredicateFuncs(func(obj client.Object) bool {
+// 		svc, ok := obj.(*corev1.Service)
+// 		return ok && svc.Spec.Type == corev1.ServiceTypeLoadBalancer
+// 	})
+
+// 	// Map Node changes to all LB Services
+// 	mapNodeToLBServices := handler.EnqueueRequestsFromMapFunc(func(obj client.Object) []reconcile.Request {
+//     node, ok := obj.(*corev1.Node)
+//     if !ok {
+//         // Not a Node? Just return nothing
+//         return nil
+//     }
+
+//     // List all LB Services (for example)
+//     svcList := &corev1.ServiceList{}
+//     err := r.Client.List(context.Background(), svcList, &client.ListOptions{})
+//     if err != nil {
+//         // On error, return no requests to avoid spamming
+//         return nil
+//     }
+
+//     var reqs []reconcile.Request
+//     for _, svc := range svcList.Items {
+//         if svc.Spec.Type == corev1.ServiceTypeLoadBalancer {
+//             reqs = append(reqs, reconcile.Request{
+//                 NamespacedName: types.NamespacedName{
+//                     Name:      svc.Name,
+//                     Namespace: svc.Namespace,
+//                 },
+//             })
+//         }
+//     }
+
+//     return reqs
+// })
+
+// 	return ctrl.NewControllerManagedBy(mgr).
+// 		For(&corev1.Service{}).
+// 		WithEventFilter(loadBalancerPredicate).
+// 		Watches(&source.Kind{Type: &corev1.Node{}}, // Also watch Node changes
+// 			mapNodeToLBServices).
+// 		Named("service").
+// 		Complete(r)
+// }
+
 func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
-
 	// Define a predicate to filter LoadBalancer services
 	loadBalancerPredicate := predicate.NewPredicateFuncs(func(obj client.Object) bool {
 		svc, ok := obj.(*corev1.Service)
 		return ok && svc.Spec.Type == corev1.ServiceTypeLoadBalancer
 	})
 
+	// Node event → mapNodeToLBServices → returns reconcile.Requests for each LB service → then Reconcile runs the handleUpdate method → gather node IPs, update load balancers, etc.
+	// mapNodeToLBServices := handler.TypedEnqueueRequestsFromMapFunc[client.Object](func(ctx context.Context, obj client.Object) []reconcile.Request {
+	mapNodeToLBServices := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+
+		node, ok := obj.(*corev1.Node)
+		if !ok {
+			return nil
+		}
+		log.Log.Info("Node event received", "node", node.Name)
+		// List all LB Services and enqueue each
+		svcList := &corev1.ServiceList{}
+		if err := r.Client.List(ctx, svcList); err != nil {
+			// On error, return no requests
+			return nil
+		}
+
+		var reqs []reconcile.Request
+		for _, svc := range svcList.Items {
+			if svc.Spec.Type == corev1.ServiceTypeLoadBalancer {
+				reqs = append(reqs, reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Namespace: svc.Namespace,
+						Name:      svc.Name,
+					},
+				})
+			}
+		}
+		return reqs
+	},
+	)
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Service{}).
 		WithEventFilter(loadBalancerPredicate).
-		Named("service").
-		Complete(r)
+		Watches(&corev1.Node{}, mapNodeToLBServices).Complete(r)
+	// Named("service").
+
 }

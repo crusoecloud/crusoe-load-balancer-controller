@@ -27,7 +27,7 @@ metadata:
   name: svc3
   namespace: default
   annotations:
-    crusoe.com/vpc-id: "406e04ef-164c-4746-8ede-496a46400278" # Replace with actual VPC ID
+    crusoe.com/vpc-id: "a0f91cb2-fdba-45c8-b7e0-19d01738221a" 
 spec:
   selector:
     app: app

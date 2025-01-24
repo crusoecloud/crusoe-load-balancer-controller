@@ -138,14 +138,34 @@ func (r *ServiceReconciler) parseListenPortsAndBackends(ctx context.Context, svc
 
 //nolint:cyclop // function is already fairly clean
 func GetHostInstance(ctx context.Context) (*crusoeapi.InstanceV1Alpha5, *crusoeapi.APIClient, error) {
-	
-
+	// logger := log.FromContext(ctx)
 	crusoeClient := crusoe.NewCrusoeClient(
-		viper.GetString(CrusoeAPIEndpointFlag),
-		viper.GetString(CrusoeAccessKeyFlag),
-		viper.GetString(CrusoeSecretKeyFlag),
+		"https://api.crusoecloud.com/v1alpha5", //viper.GetString(CrusoeAPIEndpointFlag),
+		"tvwt_ao7SeOJBAYoIXgV7Q",               // viper.GetString(CrusoeAccessKeyFlag),
+		"9M6kyFCNLmYZNZNJd958hw",               //viper.GetString(CrusoeSecretKeyFlag),
 		"crusoe-external-load-balancer-controller/0.0.1",
 	)
+
+	// crusoeClient := crusoe.NewCrusoeClient(
+	// 	"https://api.crusoecloud.site/v1alpha5", //viper.GetString(CrusoeAPIEndpointFlag),
+	// 	"jiWzrrMsSam45JTZjJs_OA",                // viper.GetString(CrusoeAccessKeyFlag),
+	// 	"2oYPidrrSaO-d-PBuNrktA",                //viper.GetString(CrusoeSecretKeyFlag),
+	// 	"crusoe-external-load-balancer-controller/0.0.1",
+	// )
+
+	// crusoeClient := crusoe.NewCrusoeClient(
+	// 	"https://api.crusoecloud.xyz/v1alpha5", //viper.GetString(CrusoeAPIEndpointFlag),
+	// 	"XDy6MTELQ1mh6ccoS8HUTQ",               // viper.GetString(CrusoeAccessKeyFlag),
+	// 	"2hPDzNQgM8WhgvmiKrl8YQ",               //viper.GetString(CrusoeSecretKeyFlag),
+	// 	"crusoe-external-load-balancer-controller/0.0.1",
+	// )
+
+	// crusoeClient := crusoe.NewCrusoeClient(
+	// 	viper.GetString(CrusoeAPIEndpointFlag),
+	// 	viper.GetString(CrusoeAccessKeyFlag),
+	// 	viper.GetString(CrusoeSecretKeyFlag),
+	// 	"crusoe-external-load-balancer-controller/0.0.1",
+	// )
 
 	var projectID string
 
@@ -164,7 +184,7 @@ func GetHostInstance(ctx context.Context) (*crusoeapi.InstanceV1Alpha5, *crusoea
 			return nil, nil, fmt.Errorf("could not get kube client: %w", clientErr)
 		}
 		// TODO: replace np-334f5c73-1.us-east1-a.compute.internal (prod) with viper.GetString(NodeNameFlag)
-		hostNode, nodeFetchErr := kubeClient.CoreV1().Nodes().Get(ctx, "np-b4bbfa71-1.us-eaststaging1-a.compute.internal", metav1.GetOptions{})
+		hostNode, nodeFetchErr := kubeClient.CoreV1().Nodes().Get(ctx, "np-334f5c73-1.us-east1-a.compute.internal", metav1.GetOptions{})
 		if nodeFetchErr != nil {
 			return nil, nil, fmt.Errorf("could not fetch current node with kube client: %w", nodeFetchErr)
 		}
@@ -175,14 +195,14 @@ func GetHostInstance(ctx context.Context) (*crusoeapi.InstanceV1Alpha5, *crusoea
 		}
 
 		// Note: if missing label check what nodepool image is being used
-		// instanceID, ok = hostNode.Labels[instanceIDLabelKey]
-		// if !ok {
-		// 	return nil, nil, errInstanceIDNotFound
-		// }
+		instanceID, ok = hostNode.Labels[instanceIDLabelKey]
+		if !ok {
+			return nil, nil, errInstanceIDNotFound
+		}
 
-		// instanceID = "b4309789-2c71-4068-a83f-1c7530d9b170" dev
-		// staging: "2ce20488-67fa-4708-be9d-e33a4f2ee206"
-		instanceID = "2ce20488-67fa-4708-be9d-e33a4f2ee206"
+		// // instanceID = "b4309789-2c71-4068-a83f-1c7530d9b170" dev
+		// // staging: "2ce20488-67fa-4708-be9d-e33a4f2ee206"
+		// instanceID = "2ce20488-67fa-4708-be9d-e33a4f2ee206"
 
 	}
 
@@ -302,7 +322,7 @@ func (r *ServiceReconciler) updateLoadBalancer(
 	}
 
 	logger.Info("Updating external load balancer with new specs", "lbID", lbUpdatePayload.Id)
-	lb_updated, httpResp, err := r.CrusoeClient.ExternalLoadBalancersApi.UpdateExternalLoadBalancer(ctx, lbUpdatePayload, r.HostInstance.ProjectId, loadBalancerID)
+	_, httpResp, err := r.CrusoeClient.ExternalLoadBalancersApi.UpdateExternalLoadBalancer(ctx, lbUpdatePayload, r.HostInstance.ProjectId, loadBalancerID)
 	if err != nil {
 		logger.Error(err, "Failed to update load balancer via API")
 		return err
@@ -313,7 +333,7 @@ func (r *ServiceReconciler) updateLoadBalancer(
 		logger.Error(nil, "Unexpected response from LB Update API", "status", httpResp.StatusCode)
 		return fmt.Errorf("unexpected status from LB API: %d", httpResp.StatusCode)
 	}
-	logger.Info("Successfully updated external load balancer", "LB", lb_updated)
+	logger.Info("Successfully updated external load balancer")
 
 	return nil
 }
