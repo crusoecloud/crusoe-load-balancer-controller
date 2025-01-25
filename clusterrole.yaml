@@ -1,0 +1,16 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: crusoe-lb-controller-role
+rules:
+  # Core API group has an empty string ("") as apiGroup
+  - apiGroups: [""]
+    resources:
+      - endpoints        # Add any other resources your controller needs
+      - services
+      - nodes
+    verbs:
+      - get
+      - list
+      - watch
+      # Include create, update, patch, delete, etc. if the controller needs to mutate them.
