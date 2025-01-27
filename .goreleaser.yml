@@ -12,7 +12,7 @@ builds:
     flags:
         - -trimpath
     ldflags:
-      - "-X 'github.com/crusoecloud/crusoe-load-balancer-controller/internal/driver.version={{ .Tag }}' -X 'github.com/crusoecloud/crusoe-load-balancer-controller/internal/driver.name={{ .Env.CRUSOE_CSI_DRIVER_NAME }}'"
+      - "-X 'github.com/crusoecloud/crusoe-load-balancer-controller/internal/driver.version={{ .Tag }}' -X 'github.com/crusoecloud/crusoe-load-balancer-controller/internal/driver.name={{ .Env.CRUSOE_LB_CONTROLLER_DRIVER_NAME }}'"
     goos:
       - linux
     goarch:
