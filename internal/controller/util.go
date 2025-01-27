@@ -19,6 +19,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 type opStatus string
@@ -139,6 +140,21 @@ func (r *ServiceReconciler) parseListenPortsAndBackends(ctx context.Context, svc
 
 //nolint:cyclop // function is already fairly clean
 func GetHostInstance(ctx context.Context) (*crusoeapi.InstanceV1Alpha5, *crusoeapi.APIClient, error) {
+	logger := log.FromContext(ctx)
+	viper.BindEnv(CrusoeAPIEndpointFlag, "CRUSOE_API_ENDPOINT")
+	viper.BindEnv(CrusoeAccessKeyFlag, "CRUSOE_ACCESS_KEY")
+	viper.BindEnv(CrusoeSecretKeyFlag, "CRUSOE_SECRET_KEY")
+	viper.BindEnv(CrusoeProjectIDFlag, "CRUSOE_PROJECT_ID")
+	viper.BindEnv(NodeNameFlag, "NODE_NAME")
+
+	endpoint := viper.GetString(CrusoeAPIEndpointFlag)
+	accessKey := viper.GetString(CrusoeAccessKeyFlag)
+	secretKey := viper.GetString(CrusoeSecretKeyFlag)
+	logger.Info("Creating Crusoe client with config",
+		"endpoint", endpoint,
+		"accessKey", accessKey,
+		"secretKey", secretKey, // or mask this
+	)
 
 	crusoeClient := crusoe.NewCrusoeClient(
 		viper.GetString(CrusoeAPIEndpointFlag),
