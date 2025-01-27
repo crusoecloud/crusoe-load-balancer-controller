@@ -164,7 +164,7 @@ func GetHostInstance(ctx context.Context) (*crusoeapi.InstanceV1Alpha5, *crusoea
 			return nil, nil, fmt.Errorf("could not get kube client: %w", clientErr)
 		}
 		// TODO: replace np-334f5c73-1.us-east1-a.compute.internal (prod) with viper.GetString(NodeNameFlag)
-		hostNode, nodeFetchErr := kubeClient.CoreV1().Nodes().Get(ctx, "np-b4bbfa71-1.us-eaststaging1-a.compute.internal", metav1.GetOptions{})
+		hostNode, nodeFetchErr := kubeClient.CoreV1().Nodes().Get(ctx, "np-a1c1052a-1.us-east1-a.compute.internal", metav1.GetOptions{})
 		if nodeFetchErr != nil {
 			return nil, nil, fmt.Errorf("could not fetch current node with kube client: %w", nodeFetchErr)
 		}
