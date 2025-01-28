@@ -49,20 +49,15 @@ help: ## Display this help.
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 
+.PHONY: dev
+dev: test build-deps ## Runs a build-deps, test, lint
+
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
 
-.PHONY: fmt
-fmt: ## Run go fmt against code.
-	go fmt ./...
-
-.PHONY: vet
-vet: ## Run go vet against code.
-	go vet ./...
-
 .PHONY: test
-test: manifests generate fmt vet envtest ## Run tests.
+test: manifests generate envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
 # TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
@@ -71,7 +66,7 @@ test: manifests generate fmt vet envtest ## Run tests.
 # - PROMETHEUS_INSTALL_SKIP=true
 # - CERT_MANAGER_INSTALL_SKIP=true
 .PHONY: test-e2e
-test-e2e: manifests generate fmt vet ## Run the e2e tests. Expected an isolated environment using Kind.
+test-e2e: manifests generate ## Run the e2e tests. Expected an isolated environment using Kind.
 	@command -v kind >/dev/null 2>&1 || { \
 		echo "Kind is not installed. Please install Kind manually."; \
 		exit 1; \
@@ -87,7 +82,7 @@ lint: golangci-lint ## Run golangci-lint linter
 	$(GOLANGCI_LINT) run
 
 .PHONY: ci
-ci: test-ci build-deps ## Runs test, build-deps, lint # need to add back lint-ci, 
+ci: build-deps ## Runs test, build-deps, lint # need to add back lint-ci, 
 
 .PHONY: build-deps
 build-deps: ## Installs build dependencies.
@@ -116,11 +111,11 @@ test-ci: ## Runs the go tests with additional options for a CI environment
 ##@ Build
 
 .PHONY: build
-build: manifests generate fmt vet ## Build manager binary.
+build: manifests generate ## Build manager binary.
 	go build -o bin/manager cmd/main.go
 
 .PHONY: run
-run: manifests generate fmt vet ## Run a controller from your host.
+run: manifests generate ## Run a controller from your host.
 	go run ./cmd/main.go
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.

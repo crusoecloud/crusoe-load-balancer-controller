@@ -168,7 +168,6 @@ func main() {
 		os.Exit(1)
 	}
 
-
 	hostInstance, crusoeClient, err := controller.GetHostInstance(context.Background())
 
 	if err != nil {

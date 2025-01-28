@@ -1,0 +1,57 @@
+version: 2
+# Visit https://goreleaser.com for documentation on how to customize this
+# behavior.
+before:
+  hooks:
+    - go mod tidy
+builds:
+  - main: ./cmd/main.go
+    env:
+      - CGO_ENABLED=0
+    mod_timestamp: '{{.CommitTimestamp }}'
+    flags:
+        - -trimpath
+    ldflags:
+      - "-X 'github.com/crusoecloud/crusoe-load-balancer-controller/internal/driver.version={{ .Tag }}' -X 'github.com/crusoecloud/crusoe-load-balancer-controller/internal/driver.name={{ .Env.CRUSOE_LB_CONTROLLER_DRIVER_NAME }}'"
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    binary: '{{ .ProjectName }}'
+dockers:
+  - image_templates:
+      - 'ghcr.io/crusoecloud/{{ .ProjectName }}:{{ .Tag }}-amd64'
+    use: buildx
+    build_flag_templates:
+      - "--pull"
+      - "--platform=linux/amd64"
+    dockerfile: Dockerfile.goreleaser
+  - image_templates:
+      - 'ghcr.io/crusoecloud/{{ .ProjectName }}:{{ .Tag }}-arm64'
+    use: buildx
+    build_flag_templates:
+      - "--pull"
+      - "--platform=linux/arm64"
+    dockerfile: Dockerfile.goreleaser
+    goarch: arm64
+docker_manifests:
+  - name_template: 'ghcr.io/crusoecloud/{{ .ProjectName }}:{{ .Tag }}'
+    image_templates:
+      - 'ghcr.io/crusoecloud/{{ .ProjectName }}:{{ .Tag }}-amd64'
+      - 'ghcr.io/crusoecloud/{{ .ProjectName }}:{{ .Tag }}-arm64'
+signs:
+  - artifacts: checksum
+    args:
+      # if you are using this in a GitHub action or some other automated pipeline, you
+      # need to pass the batch flag to indicate its not interactive.
+      - "--batch"
+      - "--local-user"
+      - "{{ .Env.GPG_FINGERPRINT }}" # set this environment variable for your signing key
+      - "--output"
+      - "${signature}"
+      - "--detach-sign"
+      - "${artifact}"
+
+changelog:
+  disable: true

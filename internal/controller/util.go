@@ -19,6 +19,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 type opStatus string
@@ -40,6 +41,7 @@ const (
 	CrusoeAccessKeyFlag                        = "crusoe-elb-access-key"
 	CrusoeSecretKeyFlag                        = "crusoe-elb-secret-key" //nolint:gosec // false positive, this is a flag name
 	CrusoeProjectIDFlag                        = "crusoe-project-id"
+	CrusoeVPCIDFlag                            = "crusoe-vpc-id"
 )
 
 var (
@@ -139,6 +141,24 @@ func (r *ServiceReconciler) parseListenPortsAndBackends(ctx context.Context, svc
 
 //nolint:cyclop // function is already fairly clean
 func GetHostInstance(ctx context.Context) (*crusoeapi.InstanceV1Alpha5, *crusoeapi.APIClient, error) {
+	logger := log.FromContext(ctx)
+	viper.BindEnv(CrusoeAPIEndpointFlag, "CRUSOE_API_ENDPOINT")
+	viper.BindEnv(CrusoeAccessKeyFlag, "CRUSOE_ACCESS_KEY")
+	viper.BindEnv(CrusoeSecretKeyFlag, "CRUSOE_SECRET_KEY")
+	viper.BindEnv(CrusoeProjectIDFlag, "CRUSOE_PROJECT_ID")
+	viper.BindEnv(CrusoeVPCIDFlag, "CRUSOE_VPC_ID")
+	viper.BindEnv(NodeNameFlag, "NODE_NAME")
+
+	endpoint := viper.GetString(CrusoeAPIEndpointFlag)
+	accessKey := viper.GetString(CrusoeAccessKeyFlag)
+	secretKey := viper.GetString(CrusoeSecretKeyFlag)
+	vpcid := viper.GetString(CrusoeVPCIDFlag)
+	logger.Info("Creating Crusoe client with config",
+		"endpoint", endpoint,
+		"accessKey", accessKey,
+		"secretKey", secretKey, // or mask this
+		"vpc-id", vpcid,
+	)
 
 	crusoeClient := crusoe.NewCrusoeClient(
 		viper.GetString(CrusoeAPIEndpointFlag),
@@ -163,8 +183,8 @@ func GetHostInstance(ctx context.Context) (*crusoeapi.InstanceV1Alpha5, *crusoea
 		if clientErr != nil {
 			return nil, nil, fmt.Errorf("could not get kube client: %w", clientErr)
 		}
-		// TODO: replace np-334f5c73-1.us-east1-a.compute.internal (prod) with viper.GetString(NodeNameFlag)
-		hostNode, nodeFetchErr := kubeClient.CoreV1().Nodes().Get(ctx, "np-b4bbfa71-1.us-eaststaging1-a.compute.internal", metav1.GetOptions{})
+
+		hostNode, nodeFetchErr := kubeClient.CoreV1().Nodes().Get(ctx, viper.GetString(NodeNameFlag), metav1.GetOptions{})
 		if nodeFetchErr != nil {
 			return nil, nil, fmt.Errorf("could not fetch current node with kube client: %w", nodeFetchErr)
 		}

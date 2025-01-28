@@ -1,0 +1,8 @@
+################################################################
+# STEP 2: build a small image and run crusoe-load-balancer-controller binary #
+################################################################
+FROM alpine:3.20.3
+
+COPY crusoe-load-balancer-controller /usr/local/go/bin/crusoe-load-balancer-controller
+
+ENTRYPOINT ["/usr/local/go/bin/crusoe-load-balancer-controller"]
