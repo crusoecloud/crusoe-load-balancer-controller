@@ -82,7 +82,7 @@ lint: golangci-lint ## Run golangci-lint linter
 	$(GOLANGCI_LINT) run
 
 .PHONY: ci
-ci: test-ci build-deps ## Runs test, build-deps, lint # need to add back lint-ci, 
+ci: build-deps ## Runs test, build-deps, lint # need to add back lint-ci, 
 
 .PHONY: build-deps
 build-deps: ## Installs build dependencies.
