@@ -25,7 +25,9 @@ import (
 
 	crusoeapi "github.com/crusoecloud/client-go/swagger/v1alpha5"
 	swagger "github.com/crusoecloud/client-go/swagger/v1alpha5"
+	"github.com/ory/viper"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -204,10 +206,16 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 	}
 
 	// Create the NodePort Service in the cluster
-	err = r.Client.Create(ctx, nodePortService)
-	if err != nil {
-		logger.Error(err, "Failed to create matching NodePort Service", "nodePortService", nodePortServiceName)
-		return ctrl.Result{}, err
+	createErr := r.Client.Create(ctx, nodePortService)
+	if createErr != nil {
+		if apierrors.IsAlreadyExists(createErr) {
+			// Race condition: Another process or reconciliation created it.
+			logger.Info("NodePort Service was just created by another process; skipping creation", "nodePortService", nodePortServiceName)
+			return ctrl.Result{}, nil
+		}
+
+		logger.Error(createErr, "Failed to create matching NodePort Service", "nodePortService", nodePortServiceName)
+		return ctrl.Result{}, createErr
 	}
 
 	logger.Info("Successfully created matching NodePort Service", "nodePortService", nodePortServiceName)
@@ -218,7 +226,7 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 
 	// Prepare payload for the API call
 	apiPayload := crusoeapi.ExternalLoadBalancerPostRequest{
-		VpcId:                  svc.Annotations["crusoe.com/vpc-id"],
+		VpcId:                  viper.GetString(CrusoeVPCIDFlag),
 		Name:                   svc.Name,
 		Location:               r.HostInstance.Location,
 		Protocol:               "LOAD_BALANCER_PROTOCOL_TCP", // only TCP supported currently

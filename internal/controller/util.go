@@ -41,6 +41,7 @@ const (
 	CrusoeAccessKeyFlag                        = "crusoe-elb-access-key"
 	CrusoeSecretKeyFlag                        = "crusoe-elb-secret-key" //nolint:gosec // false positive, this is a flag name
 	CrusoeProjectIDFlag                        = "crusoe-project-id"
+	CrusoeVPCIDFlag                            = "crusoe-vpc-id"
 )
 
 var (
@@ -145,15 +146,18 @@ func GetHostInstance(ctx context.Context) (*crusoeapi.InstanceV1Alpha5, *crusoea
 	viper.BindEnv(CrusoeAccessKeyFlag, "CRUSOE_ACCESS_KEY")
 	viper.BindEnv(CrusoeSecretKeyFlag, "CRUSOE_SECRET_KEY")
 	viper.BindEnv(CrusoeProjectIDFlag, "CRUSOE_PROJECT_ID")
+	viper.BindEnv(CrusoeVPCIDFlag, "CRUSOE_VPC_ID")
 	viper.BindEnv(NodeNameFlag, "NODE_NAME")
 
 	endpoint := viper.GetString(CrusoeAPIEndpointFlag)
 	accessKey := viper.GetString(CrusoeAccessKeyFlag)
 	secretKey := viper.GetString(CrusoeSecretKeyFlag)
+	vpcid := viper.GetString(CrusoeVPCIDFlag)
 	logger.Info("Creating Crusoe client with config",
 		"endpoint", endpoint,
 		"accessKey", accessKey,
 		"secretKey", secretKey, // or mask this
+		"vpc-id", vpcid,
 	)
 
 	crusoeClient := crusoe.NewCrusoeClient(
