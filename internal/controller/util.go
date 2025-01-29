@@ -47,8 +47,6 @@ const (
 var (
 	errInstanceNotFound  = errors.New("instance not found")
 	errMultipleInstances = errors.New("multiple instances found")
-	errVMIDReadFailed    = fmt.Errorf("failed to read %s for VM ID", vmIDFilePath)
-	errVMIDParseFailed   = fmt.Errorf("failed to parse %s for VM ID", vmIDFilePath)
 	errProjectIDNotFound = fmt.Errorf("project ID not found in %s env var or %s node label",
 		projectIDEnvKey, projectIDLabelKey)
 	errInstanceIDNotFound = fmt.Errorf("instance ID not found in %s env var or %s node label",
@@ -142,24 +140,13 @@ func (r *ServiceReconciler) parseListenPortsAndBackends(ctx context.Context, svc
 //nolint:cyclop // function is already fairly clean
 func GetHostInstance(ctx context.Context) (*crusoeapi.InstanceV1Alpha5, *crusoeapi.APIClient, error) {
 	logger := log.FromContext(ctx)
-	viper.BindEnv(CrusoeAPIEndpointFlag, "CRUSOE_API_ENDPOINT")
-	viper.BindEnv(CrusoeAccessKeyFlag, "CRUSOE_ACCESS_KEY")
-	viper.BindEnv(CrusoeSecretKeyFlag, "CRUSOE_SECRET_KEY")
-	viper.BindEnv(CrusoeProjectIDFlag, "CRUSOE_PROJECT_ID")
-	viper.BindEnv(CrusoeVPCIDFlag, "CRUSOE_VPC_ID")
-	viper.BindEnv(NodeNameFlag, "NODE_NAME")
 
-	endpoint := viper.GetString(CrusoeAPIEndpointFlag)
-	accessKey := viper.GetString(CrusoeAccessKeyFlag)
-	secretKey := viper.GetString(CrusoeSecretKeyFlag)
-	vpcid := viper.GetString(CrusoeVPCIDFlag)
-	logger.Info("Creating Crusoe client with config",
-		"endpoint", endpoint,
-		"accessKey", accessKey,
-		"secretKey", secretKey, // or mask this
-		"vpc-id", vpcid,
-	)
+	bindErr := utils.BindEnvs()
+	if bindErr != nil {
+		return nil, nil, fmt.Errorf("could not bind env variables from helm: %w", bindErr)
+	}
 
+	logger.Info("Creating Crusoe client with config", "endpoint", viper.GetString(CrusoeAPIEndpointFlag))
 	crusoeClient := crusoe.NewCrusoeClient(
 		viper.GetString(CrusoeAPIEndpointFlag),
 		viper.GetString(CrusoeAccessKeyFlag),
@@ -323,7 +310,12 @@ func (r *ServiceReconciler) updateLoadBalancer(
 		logger.Error(err, "Failed to update load balancer via API")
 		return err
 	}
-	defer httpResp.Body.Close()
+
+	defer func() {
+		if err := httpResp.Body.Close(); err != nil {
+			logger.Error(err, "Failed to close http response body: %v")
+		}
+	}()
 
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		logger.Error(nil, "Unexpected response from LB Update API", "status", httpResp.StatusCode)
