@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -164,11 +165,10 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 		return ctrl.Result{}, nil
 	}
 
-	//TODO: update status field in spec to reflect success/failure once we get SDN endpoint added
-
 	// Service does not exist, proceed to create it
 	// load balance can expose multiple ports for different protocols
 	// node port should be aware of this spec
+	//nolint:prealloc
 	var ports []corev1.ServicePort
 	for _, port := range svc.Spec.Ports {
 		newPort := corev1.ServicePort{
@@ -258,6 +258,15 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 	}
 
 	logger.Info("GOT THIS BACK", "http_resp", op.Result)
+	// update external IP of LB svc
+	externalIP := loadBalancer.Vip
+	patch := client.MergeFrom(svc.DeepCopy())
+	svc.Status.LoadBalancer.Ingress = []corev1.LoadBalancerIngress{
+		{IP: externalIP},
+	}
+	if err := r.Client.Status().Patch(ctx, svc, patch); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to patch service status with external IP: %w", err)
+	}
 
 	// Store the Load Balancer ID in the Service annotations
 	if svc.Annotations == nil {
@@ -287,7 +296,7 @@ func (r *ServiceReconciler) handleDelete(ctx context.Context, svc *corev1.Servic
 	if err != nil {
 		logger.Error(err, "Failed to delete load balancer via API", "service", svc.Name, "loadBalancerID", loadBalancerID)
 		// Retry the operation
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
 	}
 
 	// Check the HTTP response status

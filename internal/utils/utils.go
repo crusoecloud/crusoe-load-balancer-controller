@@ -11,6 +11,7 @@ import (
 
 	"github.com/briandowns/spinner"
 	swagger "github.com/crusoecloud/client-go/swagger/v1alpha5"
+	"github.com/ory/viper"
 	corev1 "k8s.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -24,6 +25,12 @@ const (
 	spinnerWaitTimeMilliSecond          = 400
 	jitterRangeMilliSecond              = 1000
 	OpInProgress               opStatus = "IN_PROGRESS"
+	CrusoeAPIEndpointFlag               = "crusoe-api-endpoint"
+	CrusoeAccessKeyFlag                 = "crusoe-elb-access-key"
+	CrusoeSecretKeyFlag                 = "crusoe-elb-secret-key" //nolint:gosec // false positive, this is a flag name
+	CrusoeProjectIDFlag                 = "crusoe-project-id"
+	CrusoeVPCIDFlag                     = "crusoe-vpc-id"
+	NodeNameFlag                        = "node-name"
 )
 
 var (
@@ -43,6 +50,7 @@ func EqualPorts(ports1, ports2 []corev1.ServicePort) bool {
 }
 
 func CopyPortsFromService(svc *corev1.Service) []corev1.ServicePort {
+	//nolint:prealloc
 	var ports []corev1.ServicePort
 	for _, port := range svc.Spec.Ports {
 		ports = append(ports, corev1.ServicePort{
@@ -106,7 +114,11 @@ func WaitForOperation(ctx context.Context, opPrefix string, op *swagger.Operatio
 		if err != nil {
 			return nil, fmt.Errorf("error getting operation with id %s: %w", op.OperationId, err)
 		}
-		httpResp.Body.Close()
+		closeErr := httpResp.Body.Close()
+		if closeErr != nil {
+			return nil, fmt.Errorf("failed to close http response body: %w", closeErr)
+		}
+
 		if httpResp.StatusCode != http.StatusOK {
 			return nil, fmt.Errorf("error getting operation with id %s with HTTP status %s: %w",
 				op.OperationId, httpResp.Status, errOperationGet)
@@ -121,4 +133,26 @@ func WaitForOperation(ctx context.Context, opPrefix string, op *swagger.Operatio
 	}
 
 	return op, nil
+}
+
+func BindEnvs() error {
+	if err := viper.BindEnv(CrusoeAPIEndpointFlag, "CRUSOE_API_ENDPOINT"); err != nil {
+		return fmt.Errorf("bind CrusoeAPIEndpointFlag: %w", err)
+	}
+	if err := viper.BindEnv(CrusoeAccessKeyFlag, "CRUSOE_ACCESS_KEY"); err != nil {
+		return fmt.Errorf("bind CrusoeAccessKeyFlag: %w", err)
+	}
+	if err := viper.BindEnv(CrusoeSecretKeyFlag, "CRUSOE_SECRET_KEY"); err != nil {
+		return fmt.Errorf("Failed to bind env CRUSOE_SECRET_KEY: %v", err)
+	}
+	if err := viper.BindEnv(CrusoeProjectIDFlag, "CRUSOE_PROJECT_ID"); err != nil {
+		return fmt.Errorf("Failed to bind env CRUSOE_PROJECT_ID: %v", err)
+	}
+	if err := viper.BindEnv(CrusoeVPCIDFlag, "CRUSOE_VPC_ID"); err != nil {
+		return fmt.Errorf("Failed to bind env CRUSOE_VPC_ID: %v", err)
+	}
+	if err := viper.BindEnv(NodeNameFlag, "NODE_NAME"); err != nil {
+		return fmt.Errorf("Failed to bind env NODE_NAME: %v", err)
+	}
+	return nil
 }

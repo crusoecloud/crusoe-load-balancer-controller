@@ -21,9 +21,6 @@ import (
 	"crypto/tls"
 	"flag"
 	"os"
-	"os/signal"
-	"sync"
-	"syscall"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
@@ -48,29 +45,6 @@ var (
 	scheme   = runtime.NewScheme()
 	setupLog = ctrl.Log.WithName("setup")
 )
-
-func interruptHandler() (*sync.WaitGroup, context.Context) {
-	// Handle interrupts
-	interrupt := make(chan os.Signal, 1)
-	signal.Notify(interrupt, os.Interrupt)
-	signal.Notify(interrupt, syscall.SIGTERM)
-	var wg sync.WaitGroup
-	wg.Add(1)
-	ctx, cancel := context.WithCancel(context.Background())
-
-	go func() {
-		select {
-		case <-ctx.Done():
-			return
-
-		case <-interrupt:
-			wg.Done()
-			cancel()
-		}
-	}()
-
-	return &wg, ctx
-}
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
