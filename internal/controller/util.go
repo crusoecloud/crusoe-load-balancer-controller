@@ -145,7 +145,7 @@ func GetHostInstance(ctx context.Context) (*crusoeapi.InstanceV1Alpha5, *crusoea
 		return nil, nil, fmt.Errorf("could not bind env variables from helm: %w", bindErr)
 	}
 
-	logger.Info("Creating Crusoe client with config", "endpoint", viper.GetString(CrusoeAPIEndpointFlag), "project-id", viper.GetString(CrusoeProjectIDFlag) == "")
+	logger.Info("Creating Crusoe client with config", "endpoint", viper.GetString(CrusoeAPIEndpointFlag))
 	crusoeClient := crusoe.NewCrusoeClient(
 		viper.GetString(CrusoeAPIEndpointFlag),
 		viper.GetString(CrusoeAccessKeyFlag),
