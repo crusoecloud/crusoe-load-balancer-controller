@@ -46,7 +46,6 @@ const (
 
 var (
 	errInstanceNotFound  = errors.New("instance not found")
-	errMultipleInstances = errors.New("multiple instances found")
 	errProjectIDNotFound = fmt.Errorf("project ID not found in %s env var or %s node label",
 		projectIDEnvKey, projectIDLabelKey)
 	errInstanceIDNotFound = fmt.Errorf("instance ID not found in %s env var or %s node label",
@@ -199,8 +198,6 @@ func GetHostInstance(ctx context.Context) (*crusoeapi.InstanceV1Alpha5, *crusoea
 
 	if len(instances.Items) == 0 {
 		return nil, nil, fmt.Errorf("%w: %s", errInstanceNotFound, instanceID)
-	} else if len(instances.Items) > 1 {
-		return nil, nil, fmt.Errorf("%w: %s", errMultipleInstances, instanceID)
 	}
 
 	return &instances.Items[0], crusoeClient, nil

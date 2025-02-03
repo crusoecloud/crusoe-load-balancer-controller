@@ -291,23 +291,48 @@ func (r *ServiceReconciler) handleDelete(ctx context.Context, svc *corev1.Servic
 
 	loadBalancerID := svc.Annotations[loadbalancerIDLabelKey]
 
+	if r.HostInstance == nil { // in case node hosting controller dies, need to re-grab
+		hostInstance, crusoeClient, _ := GetHostInstance(context.Background())
+		r.HostInstance = hostInstance
+		r.CrusoeClient = crusoeClient
+	}
+
 	// Call the API to delete the load balancer
 	_, httpResp, err := r.CrusoeClient.ExternalLoadBalancersApi.DeleteExternalLoadBalancer(ctx, r.HostInstance.ProjectId, loadBalancerID)
 	if err != nil {
-		logger.Error(err, "Failed to delete load balancer via API", "service", svc.Name, "loadBalancerID", loadBalancerID)
-		// Retry the operation
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+		statusCode := httpResp.StatusCode
+		switch statusCode {
+		case http.StatusNotFound:
+			// 404 => LB doesn't exist. Let service deletion proceed.
+			logger.Info("Load balancer not found (404). Assuming already deleted",
+				"service", svc.Name, "loadBalancerID", loadBalancerID)
+			return ctrl.Result{}, nil
+
+		case http.StatusOK, http.StatusNoContent:
+			// Some clients might set err even for 2xx, but that’s unusual.
+			// Possibly handle success or do nothing here.
+			logger.Info("Successfully deleted LB (2xx).",
+				"service", svc.Name, "loadBalancerID", loadBalancerID)
+			return ctrl.Result{}, nil
+
+		default:
+			// Some other status code => re-queue
+			logger.Error(err, "Unexpected error code from LB deletion",
+				"statusCode", statusCode, "service", svc.Name, "loadBalancerID", loadBalancerID)
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+		}
 	}
 
-	// Check the HTTP response status
-	if httpResp.StatusCode != http.StatusOK && httpResp.StatusCode != http.StatusNoContent {
-		logger.Error(nil, "Unexpected response from API during deletion", "status", httpResp.StatusCode, "service", svc.Name, "loadBalancerID", loadBalancerID)
-		// Retry on unexpected status
-		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	// If err == nil, presumably a 2xx status => success
+	if httpResp != nil && (httpResp.StatusCode == http.StatusOK || httpResp.StatusCode == http.StatusNoContent) {
+		logger.Info("Successfully deleted LB", "service", svc.Name, "loadBalancerID", loadBalancerID)
+		return ctrl.Result{}, nil
 	}
 
-	logger.Info("Successfully deleted load balancer via API", "service", svc.Name, "loadBalancerID", loadBalancerID)
-	return ctrl.Result{}, nil
+	logger.Error(err, "Failed to delete load balancer via API (unparsable error)",
+		"service", svc.Name, "loadBalancerID", loadBalancerID)
+
+	return ctrl.Result{RequeueAfter: 10 * time.Second}, err
 
 }
 
