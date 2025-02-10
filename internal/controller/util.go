@@ -16,6 +16,7 @@ import (
 	"github.com/ory/viper"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -93,6 +94,15 @@ func ParseHealthCheckOptionsFromAnnotations(annotations map[string]string) *crus
 	return healthCheckOptions
 }
 
+func isNodeReady(node *corev1.Node) bool {
+	for _, condition := range node.Status.Conditions {
+		if condition.Type == corev1.NodeReady && condition.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *ServiceReconciler) parseListenPortsAndBackends(ctx context.Context, svc *corev1.Service, logger logr.Logger) []crusoeapi.ListenPortAndBackend {
 	listenPortsAndBackends := []crusoeapi.ListenPortAndBackend{}
 
@@ -103,9 +113,17 @@ func (r *ServiceReconciler) parseListenPortsAndBackends(ctx context.Context, svc
 		return listenPortsAndBackends
 	}
 
+	// Filter out only Ready nodes
+	var readyNodes []corev1.Node
+	for _, node := range nodeList.Items {
+		if isNodeReady(&node) {
+			readyNodes = append(readyNodes, node)
+		}
+	}
+
 	// Extract internal IPs of all nodes
 	internalIPs := []string{}
-	for _, node := range nodeList.Items {
+	for _, node := range readyNodes {
 		for _, address := range node.Status.Addresses {
 			if address.Type == corev1.NodeInternalIP {
 				internalIPs = append(internalIPs, address.Address)
@@ -114,17 +132,36 @@ func (r *ServiceReconciler) parseListenPortsAndBackends(ctx context.Context, svc
 	}
 	logger.Info("Retrieved internal IPs of nodes", "internalIPs", internalIPs)
 
+	// 1. Retrieve the NodePort Service from the cluster
+	nodePortSvc := &corev1.Service{}
+	err := r.Client.Get(ctx, types.NamespacedName{Name: utils.GenerateNodePortServiceName(svc.Name), Namespace: svc.Namespace}, nodePortSvc)
+	if err != nil {
+		logger.Error(err, "Failed to get NodePort service")
+	}
+
+	// 2. Extract the NodePort from its Spec
+	var nodePorts []int32
+	for _, port := range nodePortSvc.Spec.Ports {
+		if port.NodePort != 0 {
+			nodePorts = append(nodePorts, port.NodePort)
+		}
+	}
+	logger.Info("Discovered NodePorts", "nodePorts", nodePorts)
+
 	// Map backends using the retrieved internal IPs
 	for _, port := range svc.Spec.Ports {
 		backends := []crusoeapi.Backend{}
 
-		for _, ip := range internalIPs {
-			backend := crusoeapi.Backend{
-				Ip:   ip,
-				Port: int64(port.TargetPort.IntVal), // Use the TargetPort from service spec
+		for _, nodePortVal := range nodePorts {
+			for _, ip := range internalIPs {
+				backends = append(backends, crusoeapi.Backend{
+					Ip:   ip,
+					Port: int64(nodePortVal),
+				})
 			}
-			backends = append(backends, backend)
 		}
+
+		logger.Info("Discovered backends", "backends", backends, "listenport", port.Port)
 
 		// Append to the list of ListenPortAndBackend
 		listenPortsAndBackends = append(listenPortsAndBackends, crusoeapi.ListenPortAndBackend{
