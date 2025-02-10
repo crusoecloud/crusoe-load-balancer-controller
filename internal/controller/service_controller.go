@@ -31,12 +31,15 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
 // ServiceReconciler reconciles a Service object
@@ -366,45 +369,45 @@ func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return ok && svc.Spec.Type == corev1.ServiceTypeLoadBalancer
 	})
 
-	// mapNodeToLBServices := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
+	mapNodeToLBServices := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
 
-	// 	node, ok := obj.(*corev1.Node)
-	// 	if !ok {
-	// 		return nil
-	// 	}
-	// 	log.Log.Info("Node event received", "node", node.Name)
-	// 	// List all LB Services and enqueue each
-	// 	svcList := &corev1.ServiceList{}
-	// 	if err := r.Client.List(ctx, svcList); err != nil {
-	// 		// On error, return no requests
-	// 		return nil
-	// 	}
+		node, ok := obj.(*corev1.Node)
+		if !ok {
+			return nil
+		}
+		log.Log.Info("Node event received", "node", node.Name)
+		// List all LB Services and enqueue each
+		svcList := &corev1.ServiceList{}
+		if err := r.Client.List(ctx, svcList); err != nil {
+			// On error, return no requests
+			return nil
+		}
 
-	// 	var reqs []reconcile.Request
-	// 	for _, svc := range svcList.Items {
-	// 		if svc.Spec.Type == corev1.ServiceTypeLoadBalancer {
-	// 			reqs = append(reqs, reconcile.Request{
-	// 				NamespacedName: types.NamespacedName{
-	// 					Namespace: svc.Namespace,
-	// 					Name:      svc.Name,
-	// 				},
-	// 			})
-	// 		}
-	// 	}
-	// 	return reqs
-	// },
-	// )
+		var reqs []reconcile.Request
+		for _, svc := range svcList.Items {
+			if svc.Spec.Type == corev1.ServiceTypeLoadBalancer {
+				reqs = append(reqs, reconcile.Request{
+					NamespacedName: types.NamespacedName{
+						Namespace: svc.Namespace,
+						Name:      svc.Name,
+					},
+				})
+			}
+		}
+		return reqs
+	},
+	)
 	return ctrl.NewControllerManagedBy(mgr).
 		// Watch only Service objects of type=LoadBalancer
 		For(
 			&corev1.Service{},
 			builder.WithPredicates(loadBalancerPredicate),
-		).Complete(r)
-	// // Also watch Node events, with no filter so they pass
-	// Watches(
-	// 	&corev1.Node{},
-	// 	mapNodeToLBServices,
-	// ).
-	// Complete(r)
+		).
+		// Also watch Node events, with no filter so they pass
+		Watches(
+			&corev1.Node{},
+			mapNodeToLBServices,
+		).
+		Complete(r)
 
 }
