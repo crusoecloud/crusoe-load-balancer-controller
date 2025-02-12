@@ -229,7 +229,6 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 	healthCheckOptions := ParseHealthCheckOptionsFromAnnotations(svc.Annotations)
 
 	// Prepare payload for the API call
-	logger.Info("VPCID", "http_resp", viper.GetString(CrusoeVPCIDFlag))
 	apiPayload := crusoeapi.ExternalLoadBalancerPostRequest{
 		VpcId:                  viper.GetString(CrusoeVPCIDFlag),
 		Name:                   svc.Name,
