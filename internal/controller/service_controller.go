@@ -229,6 +229,7 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 	healthCheckOptions := ParseHealthCheckOptionsFromAnnotations(svc.Annotations)
 
 	// Prepare payload for the API call
+	logger.Info("VPCID", "http_resp", viper.GetString(CrusoeVPCIDFlag))
 	apiPayload := crusoeapi.ExternalLoadBalancerPostRequest{
 		VpcId:                  viper.GetString(CrusoeVPCIDFlag),
 		Name:                   svc.Name,
@@ -403,7 +404,7 @@ func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&corev1.Service{},
 			builder.WithPredicates(loadBalancerPredicate),
 		).
-		// Also watch Node events, with no filter so they pass
+		// // Also watch Node events, with no filter so they pass
 		Watches(
 			&corev1.Node{},
 			mapNodeToLBServices,
