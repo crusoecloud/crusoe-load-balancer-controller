@@ -404,7 +404,7 @@ func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 			&corev1.Service{},
 			builder.WithPredicates(loadBalancerPredicate),
 		).
-		// // Also watch Node events, with no filter so they pass
+		// Also watch Node events, with no filter so they pass
 		Watches(
 			&corev1.Node{},
 			mapNodeToLBServices,
