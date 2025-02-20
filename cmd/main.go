@@ -143,7 +143,6 @@ func main() {
 	}
 
 	hostInstance, crusoeClient, err := controller.GetHostInstance(context.Background())
-
 	if err != nil {
 		setupLog.Error(err, "unable to get host instance", "controller", "Service")
 	}

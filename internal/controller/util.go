@@ -113,7 +113,7 @@ func (r *ServiceReconciler) parseListenPortsAndBackends(ctx context.Context, svc
 		return listenPortsAndBackends
 	}
 
-	// Filter out only Ready nodes
+	// // Filter out only Ready nodes
 	var readyNodes []corev1.Node
 	for _, node := range nodeList.Items {
 		if isNodeReady(&node) {

@@ -28,6 +28,7 @@ const (
 	CrusoeAPIEndpointFlag               = "crusoe-api-endpoint"
 	CrusoeAccessKeyFlag                 = "crusoe-elb-access-key"
 	CrusoeSecretKeyFlag                 = "crusoe-elb-secret-key" //nolint:gosec // false positive, this is a flag name
+	CrusoeClusterIDFlag                 = "crusoe-cluster-id"     //nolint:gosec // false positive, this is a flag name
 	CrusoeProjectIDFlag                 = "crusoe-project-id"
 	CrusoeVPCIDFlag                     = "crusoe-vpc-id"
 	NodeNameFlag                        = "node-name"
@@ -153,6 +154,9 @@ func BindEnvs() error {
 	}
 	if err := viper.BindEnv(NodeNameFlag, "NODE_NAME"); err != nil {
 		return fmt.Errorf("Failed to bind env NODE_NAME: %v", err)
+	}
+	if err := viper.BindEnv(CrusoeClusterIDFlag, "CRUSOE_CLUSTER_ID"); err != nil {
+		return fmt.Errorf("Failed to bind env CRUSOE_CLUSTER_ID: %v", err)
 	}
 	return nil
 }
