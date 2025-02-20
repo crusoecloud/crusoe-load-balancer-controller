@@ -309,11 +309,11 @@ func (r *ServiceReconciler) handleDelete(ctx context.Context, svc *corev1.Servic
 
 	loadBalancerID := svc.Annotations[loadbalancerIDLabelKey]
 
-	// if r.HostInstance == nil { // in case node hosting controller dies, need to re-grab
-	// 	hostInstance, crusoeClient, _ := GetHostInstance(context.Background())
-	// 	r.HostInstance = hostInstance
-	// 	r.CrusoeClient = crusoeClient
-	// }
+	if r.HostInstance == nil { // in case node hosting controller dies, need to re-grab
+		hostInstance, crusoeClient, _ := GetHostInstance(context.Background())
+		r.HostInstance = hostInstance
+		r.CrusoeClient = crusoeClient
+	}
 
 	// Call the API to delete the load balancer
 	_, httpResp, err := r.CrusoeClient.ExternalLoadBalancersApi.DeleteExternalLoadBalancer(ctx, r.HostInstance.ProjectId, loadBalancerID)
