@@ -36,11 +36,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
+
+const CrusoeClusterIDFlag = "crusoe-cluster-id" //nolint:gosec // false positive, this is a flag name
 
 // ServiceReconciler reconciles a Service object
 type ServiceReconciler struct {
@@ -229,8 +232,19 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 	healthCheckOptions := ParseHealthCheckOptionsFromAnnotations(svc.Annotations)
 
 	// Prepare payload for the API call
+	// get vpc id
+	cluster, _, err := r.CrusoeClient.KubernetesClustersApi.GetCluster(ctx, r.HostInstance.ProjectId, viper.GetString(CrusoeClusterIDFlag))
+	if err != nil {
+		logger.Error(err, "Failed to get cluster", "clusterID", viper.GetString(CrusoeClusterIDFlag))
+		return ctrl.Result{}, err
+	}
+	subnet, _, err := r.CrusoeClient.VPCSubnetsApi.GetVPCSubnet(ctx, r.HostInstance.ProjectId, cluster.SubnetId)
+	if err != nil {
+		logger.Error(err, "Failed to get vpc network id from cluster subnet id ", "subnetID", cluster.SubnetId)
+		return ctrl.Result{}, err
+	}
 	apiPayload := crusoeapi.ExternalLoadBalancerPostRequest{
-		VpcId:                  viper.GetString(CrusoeVPCIDFlag),
+		VpcId:                  subnet.VpcNetworkId,
 		Name:                   svc.Name,
 		Location:               r.HostInstance.Location,
 		Protocol:               "LOAD_BALANCER_PROTOCOL_TCP", // only TCP supported currently
@@ -369,6 +383,40 @@ func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return ok && svc.Spec.Type == corev1.ServiceTypeLoadBalancer
 	})
 
+	nodeCreateDeletePredicate := predicate.Funcs{
+		// Called for new Node objects
+		CreateFunc: func(e event.CreateEvent) bool {
+			return true
+		},
+		// Called for Node updates e.g. node from not ready to ready
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldNode, oldOk := e.ObjectOld.(*corev1.Node)
+			newNode, newOk := e.ObjectNew.(*corev1.Node)
+			if !oldOk || !newOk {
+				return false
+			}
+
+			oldReady := isNodeReady(oldNode)
+			newReady := isNodeReady(newNode)
+
+			// Only trigger if the node transitioned from NotReady -> Ready or vice versa
+			if oldReady != newReady {
+				log.Log.Info("Node readiness changed", "node", newNode.Name, "oldReady", oldReady, "newReady", newReady)
+				return true
+			}
+
+			return false // Skip other updates
+		},
+		// Called for Node deletions
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			return true
+		},
+		// Rare, generic events are usually no-ops here
+		GenericFunc: func(e event.GenericEvent) bool {
+			return false
+		},
+	}
+
 	mapNodeToLBServices := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
 
 		node, ok := obj.(*corev1.Node)
@@ -398,15 +446,16 @@ func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	},
 	)
 	return ctrl.NewControllerManagedBy(mgr).
-		// Watch only Service objects of type=LoadBalancer
+		// Watch Service objects of type=LoadBalancer
 		For(
 			&corev1.Service{},
 			builder.WithPredicates(loadBalancerPredicate),
 		).
-		// Also watch Node events, with no filter so they pass
+		// Also watch Node events to update backends list
 		Watches(
 			&corev1.Node{},
 			mapNodeToLBServices,
+			builder.WithPredicates(nodeCreateDeletePredicate),
 		).
 		Complete(r)
 
