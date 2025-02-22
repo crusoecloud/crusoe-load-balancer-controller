@@ -40,6 +40,10 @@ docker_manifests:
     image_templates:
       - 'ghcr.io/crusoecloud/{{ .ProjectName }}:{{ .Tag }}-amd64'
       - 'ghcr.io/crusoecloud/{{ .ProjectName }}:{{ .Tag }}-arm64'
+  - name_template: 'ghcr.io/crusoecloud/{{ .ProjectName }}:latest'
+    image_templates:
+      - 'ghcr.io/crusoecloud/{{ .ProjectName }}:{{ .Tag }}-amd64'
+      - 'ghcr.io/crusoecloud/{{ .ProjectName }}:{{ .Tag }}-arm64'
 signs:
   - artifacts: checksum
     args:
