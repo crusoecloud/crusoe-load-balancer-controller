@@ -50,7 +50,6 @@ type ServiceReconciler struct {
 	client.Client
 	Scheme       *runtime.Scheme
 	CrusoeClient *crusoeapi.APIClient
-	HostInstance *crusoeapi.InstanceV1Alpha5
 }
 
 // +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
@@ -233,26 +232,28 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 
 	// Prepare payload for the API call
 	// get vpc id
-	cluster, _, err := r.CrusoeClient.KubernetesClustersApi.GetCluster(ctx, r.HostInstance.ProjectId, viper.GetString(CrusoeClusterIDFlag))
+	projectId := viper.GetString(CrusoeProjectIDFlag)
+	cluster, _, err := r.CrusoeClient.KubernetesClustersApi.GetCluster(ctx, projectId, viper.GetString(CrusoeClusterIDFlag))
 	if err != nil {
 		logger.Error(err, "Failed to get cluster", "clusterID", viper.GetString(CrusoeClusterIDFlag))
 		return ctrl.Result{}, err
 	}
-	subnet, _, err := r.CrusoeClient.VPCSubnetsApi.GetVPCSubnet(ctx, r.HostInstance.ProjectId, cluster.SubnetId)
+	subnet, _, err := r.CrusoeClient.VPCSubnetsApi.GetVPCSubnet(ctx, projectId, cluster.SubnetId)
 	if err != nil {
 		logger.Error(err, "Failed to get vpc network id from cluster subnet id ", "subnetID", cluster.SubnetId)
 		return ctrl.Result{}, err
 	}
+
 	apiPayload := crusoeapi.ExternalLoadBalancerPostRequest{
 		VpcId:                  subnet.VpcNetworkId,
 		Name:                   svc.Name,
-		Location:               r.HostInstance.Location,
+		Location:               subnet.Location,
 		Protocol:               "LOAD_BALANCER_PROTOCOL_TCP", // only TCP supported currently
 		ListenPortsAndBackends: listenPortsAndBackends,
 		HealthCheckOptions:     healthCheckOptions,
 	}
 
-	op_resp, http_resp, err := r.CrusoeClient.ExternalLoadBalancersApi.CreateExternalLoadBalancer(ctx, apiPayload, r.HostInstance.ProjectId)
+	op_resp, http_resp, err := r.CrusoeClient.ExternalLoadBalancersApi.CreateExternalLoadBalancer(ctx, apiPayload, projectId)
 	if err != nil {
 		logger.Error(err, "Failed to create load balancer via API")
 		return ctrl.Result{}, nil
@@ -264,7 +265,7 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 	}
 
 	op, err := utils.WaitForOperation(ctx, "Creating ELB ...",
-		op_resp.Operation, r.HostInstance.ProjectId, r.CrusoeClient.ExternalLoadBalancerOperationsApi.GetExternalLoadBalancerOperation)
+		op_resp.Operation, projectId, r.CrusoeClient.ExternalLoadBalancerOperationsApi.GetExternalLoadBalancerOperation)
 	if err != nil || op.State != string(OpSuccess) {
 		logger.Error(err, "Failed to create LB Service", "name", svc.Name, "namespace", svc.Namespace)
 		return ctrl.Result{}, err
@@ -275,7 +276,7 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 		return ctrl.Result{}, err
 	}
 
-	logger.Info("GOT THIS BACK", "http_resp", op.Result)
+	logger.Info("RESULT", "http_resp", op.Result)
 	// update external IP of LB svc
 	externalIP := loadBalancer.Vip
 	patch := client.MergeFrom(svc.DeepCopy())
@@ -309,14 +310,9 @@ func (r *ServiceReconciler) handleDelete(ctx context.Context, svc *corev1.Servic
 
 	loadBalancerID := svc.Annotations[loadbalancerIDLabelKey]
 
-	if r.HostInstance == nil { // in case node hosting controller dies, need to re-grab
-		hostInstance, crusoeClient, _ := GetHostInstance(context.Background())
-		r.HostInstance = hostInstance
-		r.CrusoeClient = crusoeClient
-	}
-
 	// Call the API to delete the load balancer
-	_, httpResp, err := r.CrusoeClient.ExternalLoadBalancersApi.DeleteExternalLoadBalancer(ctx, r.HostInstance.ProjectId, loadBalancerID)
+	projectId := viper.GetString(CrusoeProjectIDFlag)
+	_, httpResp, err := r.CrusoeClient.ExternalLoadBalancersApi.DeleteExternalLoadBalancer(ctx, projectId, loadBalancerID)
 	if err != nil {
 		statusCode := httpResp.StatusCode
 		switch statusCode {
