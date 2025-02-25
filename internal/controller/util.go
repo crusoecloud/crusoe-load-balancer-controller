@@ -9,7 +9,6 @@ import (
 	utils "lb_controller/internal/utils"
 	"strconv"
 
-	"github.com/antihax/optional"
 	crusoeapi "github.com/crusoecloud/client-go/swagger/v1alpha5"
 	swagger "github.com/crusoecloud/client-go/swagger/v1alpha5"
 	"github.com/go-logr/logr"
@@ -174,12 +173,12 @@ func (r *ServiceReconciler) parseListenPortsAndBackends(ctx context.Context, svc
 }
 
 //nolint:cyclop // function is already fairly clean
-func GetHostInstance(ctx context.Context) (*crusoeapi.InstanceV1Alpha5, *crusoeapi.APIClient, error) {
+func GetCrusoeClient(ctx context.Context) (*crusoeapi.APIClient, error) {
 	logger := log.FromContext(ctx)
 
 	bindErr := utils.BindEnvs()
 	if bindErr != nil {
-		return nil, nil, fmt.Errorf("could not bind env variables from helm: %w", bindErr)
+		return nil, fmt.Errorf("could not bind env variables from helm: %w", bindErr)
 	}
 
 	logger.Info("Creating Crusoe client with config", "endpoint", viper.GetString(CrusoeAPIEndpointFlag))
@@ -192,52 +191,32 @@ func GetHostInstance(ctx context.Context) (*crusoeapi.InstanceV1Alpha5, *crusoea
 
 	var projectID string
 
-	var instanceID string
-
 	projectID = viper.GetString(CrusoeProjectIDFlag)
 	if projectID == "" {
 		var ok bool
 		kubeClientConfig, configErr := rest.InClusterConfig()
 		if configErr != nil {
-			return nil, nil, fmt.Errorf("could not get kube client config: %w", configErr)
+			return nil, fmt.Errorf("could not get kube client config: %w", configErr)
 		}
 
 		kubeClient, clientErr := kubernetes.NewForConfig(kubeClientConfig)
 		if clientErr != nil {
-			return nil, nil, fmt.Errorf("could not get kube client: %w", clientErr)
+			return nil, fmt.Errorf("could not get kube client: %w", clientErr)
 		}
 
 		hostNode, nodeFetchErr := kubeClient.CoreV1().Nodes().Get(ctx, viper.GetString(NodeNameFlag), metav1.GetOptions{})
 		if nodeFetchErr != nil {
-			return nil, nil, fmt.Errorf("could not fetch current node with kube client: %w", nodeFetchErr)
+			return nil, fmt.Errorf("could not fetch current node with kube client: %w", nodeFetchErr)
 		}
 
 		projectID, ok = hostNode.Labels[projectIDLabelKey]
 		if !ok {
-			return nil, nil, errProjectIDNotFound
-		}
-
-		// Note: if missing label check what nodepool image is being used
-		instanceID, ok = hostNode.Labels[instanceIDLabelKey]
-		if !ok {
-			return nil, nil, errInstanceIDNotFound
+			return nil, errProjectIDNotFound
 		}
 
 	}
 
-	instances, _, err := crusoeClient.VMsApi.ListInstances(ctx, projectID,
-		&crusoeapi.VMsApiListInstancesOpts{
-			Ids: optional.NewString(instanceID),
-		})
-	if err != nil {
-		return nil, crusoeClient, fmt.Errorf("failed to list instances: %w", err)
-	}
-
-	if len(instances.Items) == 0 {
-		return nil, nil, fmt.Errorf("%w: %s", errInstanceNotFound, instanceID)
-	}
-
-	return &instances.Items[0], crusoeClient, nil
+	return crusoeClient, nil
 }
 
 func OpResultToItem[T any](res interface{}) (*T, error) {
@@ -339,7 +318,8 @@ func (r *ServiceReconciler) updateLoadBalancer(
 	}
 
 	logger.Info("Updating external load balancer with new specs", "lbID", lbUpdatePayload.Id)
-	lb_updated, httpResp, err := r.CrusoeClient.ExternalLoadBalancersApi.UpdateExternalLoadBalancer(ctx, lbUpdatePayload, r.HostInstance.ProjectId, loadBalancerID)
+	projectId := viper.GetString(CrusoeProjectIDFlag)
+	lb_updated, httpResp, err := r.CrusoeClient.ExternalLoadBalancersApi.UpdateExternalLoadBalancer(ctx, lbUpdatePayload, projectId, loadBalancerID)
 	if err != nil {
 		logger.Error(err, "Failed to update load balancer via API")
 		return err

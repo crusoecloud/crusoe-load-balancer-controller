@@ -142,16 +142,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	hostInstance, crusoeClient, err := controller.GetHostInstance(context.Background())
+	crusoeClient, err := controller.GetCrusoeClient(context.Background())
 	if err != nil {
-		setupLog.Error(err, "unable to get host instance", "controller", "Service")
+		setupLog.Error(err, "unable to create crusoe client", "controller", "Service")
 	}
 
 	if err = (&controller.ServiceReconciler{
 		Client:       mgr.GetClient(),
 		Scheme:       mgr.GetScheme(),
 		CrusoeClient: crusoeClient,
-		HostInstance: hostInstance, // TODO add hostInstance
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Service")
 		os.Exit(1)
