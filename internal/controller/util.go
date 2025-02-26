@@ -14,10 +14,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/ory/viper"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
@@ -45,11 +42,6 @@ const (
 )
 
 var (
-	errInstanceNotFound  = errors.New("instance not found")
-	errProjectIDNotFound = fmt.Errorf("project ID not found in %s env var or %s node label",
-		projectIDEnvKey, projectIDLabelKey)
-	errInstanceIDNotFound = fmt.Errorf("instance ID not found in %s env var or %s node label",
-		instanceIDEnvKey, instanceIDLabelKey)
 	errUnableToGetOpRes = errors.New("failed to get result of operation")
 )
 
@@ -188,33 +180,6 @@ func GetCrusoeClient(ctx context.Context) (*crusoeapi.APIClient, error) {
 		viper.GetString(CrusoeSecretKeyFlag),
 		"crusoe-external-load-balancer-controller/0.0.1",
 	)
-
-	var projectID string
-
-	projectID = viper.GetString(CrusoeProjectIDFlag)
-	if projectID == "" {
-		var ok bool
-		kubeClientConfig, configErr := rest.InClusterConfig()
-		if configErr != nil {
-			return nil, fmt.Errorf("could not get kube client config: %w", configErr)
-		}
-
-		kubeClient, clientErr := kubernetes.NewForConfig(kubeClientConfig)
-		if clientErr != nil {
-			return nil, fmt.Errorf("could not get kube client: %w", clientErr)
-		}
-
-		hostNode, nodeFetchErr := kubeClient.CoreV1().Nodes().Get(ctx, viper.GetString(NodeNameFlag), metav1.GetOptions{})
-		if nodeFetchErr != nil {
-			return nil, fmt.Errorf("could not fetch current node with kube client: %w", nodeFetchErr)
-		}
-
-		projectID, ok = hostNode.Labels[projectIDLabelKey]
-		if !ok {
-			return nil, errProjectIDNotFound
-		}
-
-	}
 
 	return crusoeClient, nil
 }
