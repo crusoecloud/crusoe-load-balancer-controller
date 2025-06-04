@@ -14,8 +14,6 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/ory/viper"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -122,17 +120,10 @@ func (r *ServiceReconciler) parseListenPortsAndBackends(ctx context.Context, svc
 		}
 	}
 	logger.Info("Retrieved internal IPs of nodes", "internalIPs", internalIPs)
-
-	// 1. Retrieve the NodePort Service from the cluster
-	nodePortSvc := &corev1.Service{}
-	err := r.Client.Get(ctx, types.NamespacedName{Name: utils.GenerateNodePortServiceName(svc.Name), Namespace: svc.Namespace}, nodePortSvc)
-	if err != nil {
-		logger.Error(err, "Failed to get NodePort service")
-	}
-
+	
 	// 2. Extract the NodePort from its Spec
 	var nodePorts []int32
-	for _, port := range nodePortSvc.Spec.Ports {
+	for _, port := range svc.Spec.Ports {
 		if port.NodePort != 0 {
 			nodePorts = append(nodePorts, port.NodePort)
 		}
@@ -197,70 +188,6 @@ func OpResultToItem[T any](res interface{}) (*T, error) {
 	}
 
 	return &item, nil
-}
-
-// update helper logic below
-func (r *ServiceReconciler) updateNodePortService(
-	ctx context.Context,
-	svc *corev1.Service,
-	logger logr.Logger,
-) (bool, error) {
-	nodePortServiceName := utils.GenerateNodePortServiceName(svc.Name)
-
-	// Attempt to fetch existing NodePort Service
-	existingNodePortService := &corev1.Service{}
-	err := r.Client.Get(ctx, client.ObjectKey{
-		Namespace: svc.Namespace,
-		Name:      nodePortServiceName,
-	}, existingNodePortService)
-	if err != nil {
-		if client.IgnoreNotFound(err) == nil {
-			// NodePort Service does not exist; create it using handleCreate
-			logger.Info("NodePort Service not found; creating a new one", "nodePortService", nodePortServiceName)
-			_, createErr := r.handleCreate(ctx, svc)
-			return true, createErr
-		}
-		// Unexpected error
-		logger.Error(err, "Failed to fetch NodePort Service", "nodePortService", nodePortServiceName)
-		return false, err
-	}
-
-	// Track if we need to update the NodePort service
-	updated := false
-
-	// Compare and update ports if changed
-	if !utils.EqualPorts(existingNodePortService.Spec.Ports, svc.Spec.Ports) {
-		logger.Info("Updating NodePort Service ports", "nodePortService", nodePortServiceName)
-
-		// Copy ports from svc, then clear NodePort to avoid collisions
-		newPorts := utils.CopyPortsFromService(svc)
-		for i := range newPorts {
-			newPorts[i].NodePort = 0
-		}
-		existingNodePortService.Spec.Ports = newPorts
-		updated = true
-	}
-
-	// Compare and update selectors if changed
-	if svc.Spec.Selector != nil && !utils.EqualSelectors(existingNodePortService.Spec.Selector, svc.Spec.Selector) {
-		logger.Info("Updating NodePort Service selector", "nodePortService", nodePortServiceName)
-		existingNodePortService.Spec.Selector = svc.Spec.Selector
-		updated = true
-	}
-
-	if updated {
-		// Apply updates
-		if err := r.Client.Update(ctx, existingNodePortService); err != nil {
-			logger.Error(err, "Failed to update NodePort Service", "nodePortService", nodePortServiceName)
-			return false, err
-		}
-		logger.Info("Successfully updated NodePort Service", "nodePortService", nodePortServiceName)
-		return true, nil
-	}
-
-	// No updates needed
-	logger.Info("No updates needed for NodePort Service", "nodePortService", nodePortServiceName)
-	return false, nil
 }
 
 func (r *ServiceReconciler) updateLoadBalancer(

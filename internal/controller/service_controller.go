@@ -28,8 +28,6 @@ import (
 	swagger "github.com/crusoecloud/client-go/swagger/v1alpha5"
 	"github.com/ory/viper"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -149,82 +147,6 @@ func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 // handleCreate handles the creation of a LoadBalancer for the given Service
 func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Service) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-
-	// Define the NodePort Service name
-	nodePortServiceName := utils.GenerateNodePortServiceName(svc.Name)
-
-	// Check if NodePort Service already exists
-	existingNodePortService := &corev1.Service{}
-	err := r.Client.Get(ctx, client.ObjectKey{
-		Namespace: svc.Namespace,
-		Name:      nodePortServiceName,
-	}, existingNodePortService)
-	if err != nil {
-		if client.IgnoreNotFound(err) != nil {
-			// Return the error if it is not a "not found" error
-			logger.Error(err, "Failed to check existence of NodePort Service", "nodePortService", nodePortServiceName)
-			return ctrl.Result{}, err
-		}
-	} else {
-		// Service already exists, log and skip creation
-		logger.Info("NodePort Service already exists; skipping creation", "nodePortService", nodePortServiceName)
-		return ctrl.Result{}, nil
-	}
-
-	// Service does not exist, proceed to create it
-	// load balance can expose multiple ports for different protocols
-	// node port should be aware of this spec
-	//nolint:prealloc
-	var ports []corev1.ServicePort
-	for _, port := range svc.Spec.Ports {
-		newPort := corev1.ServicePort{
-			Name:       port.Name,       // Keep the port name (e.g., "http").
-			Protocol:   port.Protocol,   // Default is TCP, same as the LoadBalancer Service.
-			Port:       port.Port,       // Same port number (e.g., 80).
-			TargetPort: port.TargetPort, // Route to the same target port in Pods (e.g., 8080).
-		}
-
-		ports = append(ports, newPort)
-	}
-
-	nodePortService := &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      nodePortServiceName,
-			Namespace: svc.Namespace,
-			Labels: map[string]string{
-				"crusoe.ai/crusoe-load-balancer-controller.generated":  "true",
-				"crusoe.ai/crusoe-load-balancer-controller.parent-svc": svc.Name, // Parent service name
-			},
-		},
-		Spec: corev1.ServiceSpec{
-			Type:     corev1.ServiceTypeNodePort,
-			Ports:    ports,
-			Selector: svc.Spec.Selector, // Ensure traffic is routed to the same pods
-		},
-	}
-
-	// marks the NodePort service as a child resource of the LoadBalancer service
-	// ensures that if LB service is deleted, the NodePort service is garbage-collected
-	err = controllerutil.SetControllerReference(svc, nodePortService, r.Scheme)
-	if err != nil {
-		logger.Error(err, "Failed to set owner reference for NodePort Service", "nodePortService", nodePortServiceName)
-		return ctrl.Result{}, err
-	}
-
-	// Create the NodePort Service in the cluster
-	createErr := r.Client.Create(ctx, nodePortService)
-	if createErr != nil {
-		if apierrors.IsAlreadyExists(createErr) {
-			// Race condition: Another process or reconciliation created it.
-			logger.Info("NodePort Service was just created by another process; skipping creation", "nodePortService", nodePortServiceName)
-			return ctrl.Result{}, nil
-		}
-
-		logger.Error(createErr, "Failed to create matching NodePort Service", "nodePortService", nodePortServiceName)
-		return ctrl.Result{}, createErr
-	}
-
-	logger.Info("Successfully created matching NodePort Service", "nodePortService", nodePortServiceName)
 
 	listenPortsAndBackends := r.parseListenPortsAndBackends(ctx, svc, logger)
 
@@ -354,13 +276,7 @@ func (r *ServiceReconciler) handleDelete(ctx context.Context, svc *corev1.Servic
 func (r *ServiceReconciler) handleUpdate(ctx context.Context, svc *corev1.Service) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// 1. Ensure NodePort Service is up to date
-	_, nodePortErr := r.updateNodePortService(ctx, svc, logger)
-	if nodePortErr != nil {
-		return ctrl.Result{}, nodePortErr
-	}
-
-	// 2. Update External LB if needed
+	// Update External LB if needed
 	if err := r.updateLoadBalancer(ctx, svc, logger); err != nil {
 		// Could choose to requeue on errors
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
