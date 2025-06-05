@@ -116,15 +116,10 @@ func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 	}
 
-	// Determine CRUD operation
-	// TODO: in the future we'd perform a GET against the LB API to check if there's a LB with the
-	// name that we're looking for to know if it's a create or update operation
-	var operation string
-	if svc.CreationTimestamp.Time.Add(10 * time.Second).After(time.Now()) {
-		// Treat recently created services as 'create'
+	// Determine CRUD operation based on whether we've already created a load balancer for this service
+	operation := "update"
+	if _, exists := svc.Annotations[loadbalancerIDLabelKey]; !exists {
 		operation = "create"
-	} else {
-		operation = "update"
 	}
 
 	// Handle operations using a switch statement
@@ -178,12 +173,13 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 	op_resp, http_resp, err := r.CrusoeClient.ExternalLoadBalancersApi.CreateExternalLoadBalancer(ctx, apiPayload, projectId)
 	if err != nil {
 		logger.Error(err, "Failed to create load balancer via API")
-		return ctrl.Result{}, nil
+		return ctrl.Result{}, fmt.Errorf("failed to create load balancer: %w", err)
 	}
 
 	if http_resp.StatusCode != http.StatusOK && http_resp.StatusCode != http.StatusCreated {
-		logger.Error(nil, "Unexpected response from API", "status", http_resp.StatusCode)
-		return ctrl.Result{}, nil
+		err := fmt.Errorf("unexpected status code from API: %d", http_resp.StatusCode)
+		logger.Error(err, "Unexpected response from API")
+		return ctrl.Result{}, err
 	}
 
 	op, err := utils.WaitForOperation(ctx, "Creating ELB ...",
