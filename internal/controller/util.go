@@ -120,34 +120,33 @@ func (r *ServiceReconciler) parseListenPortsAndBackends(ctx context.Context, svc
 		}
 	}
 	logger.Info("Retrieved internal IPs of nodes", "internalIPs", internalIPs)
-	
-	// 2. Extract the NodePort from its Spec
-	var nodePorts []int32
-	for _, port := range svc.Spec.Ports {
-		if port.NodePort != 0 {
-			nodePorts = append(nodePorts, port.NodePort)
-		}
-	}
-	logger.Info("Discovered NodePorts", "nodePorts", nodePorts)
 
-	// Map backends using the retrieved internal IPs
+	// For each service port, create a mapping to its corresponding node port and backends
 	for _, port := range svc.Spec.Ports {
-		backends := []crusoeapi.Backend{}
-
-		for _, nodePortVal := range nodePorts {
-			for _, ip := range internalIPs {
-				backends = append(backends, crusoeapi.Backend{
-					Ip:   ip,
-					Port: int64(nodePortVal),
-				})
-			}
+		// Skip if no node port is assigned
+		if port.NodePort == 0 {
+			logger.Info("Skipping port with no node port assigned", "port", port.Port)
+			continue
 		}
 
-		logger.Info("Discovered backends", "backends", backends, "listenport", port.Port)
+		// Create backends for this specific port
+		var backends []crusoeapi.Backend
+		for _, ip := range internalIPs {
+			backends = append(backends, crusoeapi.Backend{
+				Ip:   ip,
+				Port: int64(port.NodePort),
+			})
+		}
 
-		// Append to the list of ListenPortAndBackend
+		logger.Info("Mapped service port to node port", 
+			"servicePort", port.Port, 
+			"nodePort", port.NodePort, 
+			"protocol", port.Protocol,
+			"backends", backends)
+
+		// Add to the list of ListenPortAndBackend
 		listenPortsAndBackends = append(listenPortsAndBackends, crusoeapi.ListenPortAndBackend{
-			ListenPort: int64(port.Port), // Map the port exposed by the service
+			ListenPort: int64(port.Port), // The port exposed by the service
 			Backends:   backends,
 		})
 	}
