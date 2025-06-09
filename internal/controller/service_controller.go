@@ -173,12 +173,22 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 	op_resp, http_resp, err := r.CrusoeClient.ExternalLoadBalancersApi.CreateExternalLoadBalancer(ctx, apiPayload, projectId)
 	if err != nil {
 		logger.Error(err, "Failed to create load balancer via API")
+		// Only retry if this is not a client error (4xx)
+		if http_resp != nil && http_resp.StatusCode >= 400 && http_resp.StatusCode < 500 {
+			logger.Info("Client error (4xx) detected, will not retry", "statusCode", http_resp.StatusCode)
+			return ctrl.Result{}, nil
+		}
 		return ctrl.Result{}, fmt.Errorf("failed to create load balancer: %w", err)
 	}
 
 	if http_resp.StatusCode != http.StatusOK && http_resp.StatusCode != http.StatusCreated {
 		err := fmt.Errorf("unexpected status code from API: %d", http_resp.StatusCode)
 		logger.Error(err, "Unexpected response from API")
+		// Only retry if this is not a client error (4xx)
+		if http_resp.StatusCode >= 400 && http_resp.StatusCode < 500 {
+			logger.Info("Client error (4xx) detected, will not retry", "statusCode", http_resp.StatusCode)
+			return ctrl.Result{}, nil
+		}
 		return ctrl.Result{}, err
 	}
 
