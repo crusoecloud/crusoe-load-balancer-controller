@@ -138,9 +138,9 @@ func (r *ServiceReconciler) parseListenPortsAndBackends(ctx context.Context, svc
 			})
 		}
 
-		logger.Info("Mapped service port to node port", 
-			"servicePort", port.Port, 
-			"nodePort", port.NodePort, 
+		logger.Info("Mapped service port to node port",
+			"servicePort", port.Port,
+			"nodePort", port.NodePort,
 			"protocol", port.Protocol,
 			"backends", backends)
 
