@@ -20,23 +20,28 @@ import (
 type opStatus string
 
 const (
-	AnnotationHealthCheckFailureCount          = "crusoe.ai/health-check-failure-count"
-	AnnotationHealthCheckInterval              = "crusoe.ai/health-check-interval"
-	AnnotationHealthCheckSuccessCount          = "crusoe.ai/health-check-success-count"
-	AnnotationHealthCheckTimeout               = "crusoe.ai/health-check-timeout"
-	projectIDEnvKey                            = "CRUSOE_PROJECT_ID"
-	projectIDLabelKey                          = "crusoe.ai/project.id"
-	instanceIDEnvKey                           = "CRUSOE_INSTANCE_ID"
-	instanceIDLabelKey                         = "crusoe.ai/instance.id"
-	loadbalancerIDLabelKey                     = "crusoe.ai/load-balancer-id"
-	vmIDFilePath                               = "/sys/class/dmi/id/product_uuid"
-	NodeNameFlag                               = "node-name"
-	OpSuccess                         opStatus = "SUCCEEDED"
-	CrusoeAPIEndpointFlag                      = "crusoe-api-endpoint"
-	CrusoeAccessKeyFlag                        = "crusoe-elb-access-key"
-	CrusoeSecretKeyFlag                        = "crusoe-elb-secret-key" //nolint:gosec // false positive, this is a flag name
-	CrusoeProjectIDFlag                        = "crusoe-project-id"
-	CrusoeVPCIDFlag                            = "crusoe-vpc-id"
+	AnnotationHealthCheckFailureCount = "crusoe.ai/health-check-failure-count"
+	AnnotationHealthCheckInterval     = "crusoe.ai/health-check-interval"
+	AnnotationHealthCheckSuccessCount = "crusoe.ai/health-check-success-count"
+	AnnotationHealthCheckTimeout      = "crusoe.ai/health-check-timeout"
+	AnnotationCrusoeManagedCluster    = "crusoe.ai/crusoe-managed-cluster"
+	// Self-managed cluster configuration with organized prefixes
+	AnnotationSelfManagedVPCID             = "crusoe.ai/self-managed.vpc-id"
+	AnnotationSelfManagedSubnetID          = "crusoe.ai/self-managed.subnet-id"
+	AnnotationSelfManagedLocation          = "crusoe.ai/self-managed.location"
+	projectIDEnvKey                        = "CRUSOE_PROJECT_ID"
+	projectIDLabelKey                      = "crusoe.ai/project.id"
+	instanceIDEnvKey                       = "CRUSOE_INSTANCE_ID"
+	instanceIDLabelKey                     = "crusoe.ai/instance.id"
+	loadbalancerIDLabelKey                 = "crusoe.ai/load-balancer-id"
+	vmIDFilePath                           = "/sys/class/dmi/id/product_uuid"
+	NodeNameFlag                           = "node-name"
+	OpSuccess                     opStatus = "SUCCEEDED"
+	CrusoeAPIEndpointFlag                  = "crusoe-api-endpoint"
+	CrusoeAccessKeyFlag                    = "crusoe-elb-access-key"
+	CrusoeSecretKeyFlag                    = "crusoe-elb-secret-key" //nolint:gosec // false positive, this is a flag name
+	CrusoeProjectIDFlag                    = "crusoe-project-id"
+	CrusoeVPCIDFlag                        = "crusoe-vpc-id"
 )
 
 var (
@@ -229,4 +234,76 @@ func (r *ServiceReconciler) updateLoadBalancer(
 	logger.Info("Successfully updated external load balancer", "LB", lb_updated)
 
 	return nil
+}
+
+// isCrusoeManagedCluster checks if the service is running on a Crusoe-managed cluster
+func isCrusoeManagedCluster(svc *corev1.Service) bool {
+	if svc.Annotations == nil {
+		return true // Default to Crusoe-managed for backward compatibility
+	}
+
+	// Check if the annotation explicitly sets it to false
+	if managed, exists := svc.Annotations[AnnotationCrusoeManagedCluster]; exists {
+		return managed != "false"
+	}
+
+	return true // Default to Crusoe-managed for backward compatibility
+}
+
+// getVPCInfoForSelfManagedCluster extracts VPC information from service annotations
+func getVPCInfoForSelfManagedCluster(svc *corev1.Service) (vpcID, subnetID, location string, err error) {
+	if svc.Annotations == nil {
+		return "", "", "", fmt.Errorf("no annotations found on service")
+	}
+
+	vpcID = svc.Annotations[AnnotationSelfManagedVPCID]
+	if vpcID == "" {
+		return "", "", "", fmt.Errorf("vpc-id annotation is required for self-managed clusters")
+	}
+
+	subnetID = svc.Annotations[AnnotationSelfManagedSubnetID]
+	if subnetID == "" {
+		return "", "", "", fmt.Errorf("subnet-id annotation is required for self-managed clusters")
+	}
+
+	location = svc.Annotations[AnnotationSelfManagedLocation]
+	if location == "" {
+		return "", "", "", fmt.Errorf("location annotation is required for self-managed clusters")
+	}
+
+	return vpcID, subnetID, location, nil
+}
+
+// Alternative: Get VPC info from JSON structure in single annotation
+func getVPCInfoFromJSONAnnotation(svc *corev1.Service) (vpcID, subnetID, location string, err error) {
+	if svc.Annotations == nil {
+		return "", "", "", fmt.Errorf("no annotations found on service")
+	}
+
+	configJSON := svc.Annotations["crusoe.ai/self-managed-config"]
+	if configJSON == "" {
+		return "", "", "", fmt.Errorf("self-managed-config annotation is required for self-managed clusters")
+	}
+
+	var config struct {
+		VPCID    string `json:"vpc-id"`
+		SubnetID string `json:"subnet-id"`
+		Location string `json:"location"`
+	}
+
+	if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
+		return "", "", "", fmt.Errorf("failed to parse self-managed-config JSON: %w", err)
+	}
+
+	if config.VPCID == "" {
+		return "", "", "", fmt.Errorf("vpc-id is required in self-managed-config")
+	}
+	if config.SubnetID == "" {
+		return "", "", "", fmt.Errorf("subnet-id is required in self-managed-config")
+	}
+	if config.Location == "" {
+		return "", "", "", fmt.Errorf("location is required in self-managed-config")
+	}
+
+	return config.VPCID, config.SubnetID, config.Location, nil
 }

@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: example-service
+  namespace: default
+  annotations:
+    # Indicate this is a self-managed cluster (not Crusoe-managed)
+    crusoe.ai/crusoe-managed-cluster: "false"
+    # Self-managed cluster configuration
+    crusoe.ai/self-managed.vpc-id: "your-vpc-id-here"
+    crusoe.ai/self-managed.subnet-id: "your-subnet-id-here"
+    crusoe.ai/self-managed.location: "your-location-here"
+    # Optional health check configurations
+    crusoe.ai/health-check-interval: "30"
+    crusoe.ai/health-check-timeout: "5"
+    crusoe.ai/health-check-success-count: "2"
+    crusoe.ai/health-check-failure-count: "3"
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 80
+      targetPort: 8080
+      nodePort: 30080
+      protocol: TCP
+  selector:
+    app: example-app 
