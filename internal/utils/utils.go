@@ -19,8 +19,6 @@ import (
 type opStatus string
 
 const (
-	maxNameLength                       = 63
-	suffix                              = "-nodeport"
 	maxBackOffSeconds                   = 8
 	spinnerWaitTimeMilliSecond          = 400
 	jitterRangeMilliSecond              = 1000
@@ -75,14 +73,6 @@ func EqualSelectors(selector1, selector2 map[string]string) bool {
 		}
 	}
 	return true
-}
-
-// https://stackoverflow.com/a/59917275, Service names are restricted to a maximum of 63 characters
-func GenerateNodePortServiceName(baseName string) string {
-	if len(baseName)+len(suffix) > maxNameLength {
-		baseName = baseName[:maxNameLength-len(suffix)]
-	}
-	return baseName + suffix
 }
 
 func jitterMillisecond(max int) time.Duration {
