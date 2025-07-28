@@ -25,10 +25,8 @@ const (
 	AnnotationHealthCheckSuccessCount = "crusoe.ai/health-check-success-count"
 	AnnotationHealthCheckTimeout      = "crusoe.ai/health-check-timeout"
 	AnnotationCrusoeManagedCluster    = "crusoe.ai/crusoe-managed-cluster"
-	// Self-managed cluster configuration with organized prefixes
-	AnnotationSelfManagedVPCID             = "crusoe.ai/self-managed.vpc-id"
+	// Self-managed cluster configuration - only subnet ID needed
 	AnnotationSelfManagedSubnetID          = "crusoe.ai/self-managed.subnet-id"
-	AnnotationSelfManagedLocation          = "crusoe.ai/self-managed.location"
 	projectIDEnvKey                        = "CRUSOE_PROJECT_ID"
 	projectIDLabelKey                      = "crusoe.ai/project.id"
 	instanceIDEnvKey                       = "CRUSOE_INSTANCE_ID"
@@ -42,6 +40,7 @@ const (
 	CrusoeSecretKeyFlag                    = "crusoe-elb-secret-key" //nolint:gosec // false positive, this is a flag name
 	CrusoeProjectIDFlag                    = "crusoe-project-id"
 	CrusoeVPCIDFlag                        = "crusoe-vpc-id"
+	CrusoeSubnetIDFlag                     = "crusoe-subnet-id"
 )
 
 var (
@@ -236,74 +235,28 @@ func (r *ServiceReconciler) updateLoadBalancer(
 	return nil
 }
 
-// isCrusoeManagedCluster checks if the service is running on a Crusoe-managed cluster
-func isCrusoeManagedCluster(svc *corev1.Service) bool {
-	if svc.Annotations == nil {
-		return true // Default to Crusoe-managed for backward compatibility
-	}
-
-	// Check if the annotation explicitly sets it to false
-	if managed, exists := svc.Annotations[AnnotationCrusoeManagedCluster]; exists {
-		return managed != "false"
-	}
-
-	return true // Default to Crusoe-managed for backward compatibility
+// isSubnetIDProvided checks if the subnet ID environment variable is provided
+func isSubnetIDProvided() bool {
+	subnetID := viper.GetString(CrusoeSubnetIDFlag)
+	return subnetID != ""
 }
 
-// getVPCInfoForSelfManagedCluster extracts VPC information from service annotations
-func getVPCInfoForSelfManagedCluster(svc *corev1.Service) (vpcID, subnetID, location string, err error) {
-	if svc.Annotations == nil {
-		return "", "", "", fmt.Errorf("no annotations found on service")
-	}
-
-	vpcID = svc.Annotations[AnnotationSelfManagedVPCID]
-	if vpcID == "" {
-		return "", "", "", fmt.Errorf("vpc-id annotation is required for self-managed clusters")
-	}
-
-	subnetID = svc.Annotations[AnnotationSelfManagedSubnetID]
+// getVPCInfoForSelfManagedCluster gets subnet ID from environment variable and fetches VPC info from Crusoe API
+func getVPCInfoForSelfManagedCluster(ctx context.Context, crusoeClient *crusoeapi.APIClient) (vpcID, subnetID, location string, err error) {
+	subnetID = viper.GetString(CrusoeSubnetIDFlag)
 	if subnetID == "" {
-		return "", "", "", fmt.Errorf("subnet-id annotation is required for self-managed clusters")
+		return "", "", "", fmt.Errorf("CRUSOE_SUBNET_ID environment variable must be defined in helm values if used")
 	}
 
-	location = svc.Annotations[AnnotationSelfManagedLocation]
-	if location == "" {
-		return "", "", "", fmt.Errorf("location annotation is required for self-managed clusters")
+	// Fetch VPC and location information from the subnet using Crusoe API
+	projectId := viper.GetString(CrusoeProjectIDFlag)
+	subnet, _, err := crusoeClient.VPCSubnetsApi.GetVPCSubnet(ctx, projectId, subnetID)
+	if err != nil {
+		return "", "", "", fmt.Errorf("failed to get subnet information from Crusoe API: %w", err)
 	}
+
+	vpcID = subnet.VpcNetworkId
+	location = subnet.Location
 
 	return vpcID, subnetID, location, nil
-}
-
-// Alternative: Get VPC info from JSON structure in single annotation
-func getVPCInfoFromJSONAnnotation(svc *corev1.Service) (vpcID, subnetID, location string, err error) {
-	if svc.Annotations == nil {
-		return "", "", "", fmt.Errorf("no annotations found on service")
-	}
-
-	configJSON := svc.Annotations["crusoe.ai/self-managed-config"]
-	if configJSON == "" {
-		return "", "", "", fmt.Errorf("self-managed-config annotation is required for self-managed clusters")
-	}
-
-	var config struct {
-		VPCID    string `json:"vpc-id"`
-		SubnetID string `json:"subnet-id"`
-		Location string `json:"location"`
-	}
-
-	if err := json.Unmarshal([]byte(configJSON), &config); err != nil {
-		return "", "", "", fmt.Errorf("failed to parse self-managed-config JSON: %w", err)
-	}
-
-	if config.VPCID == "" {
-		return "", "", "", fmt.Errorf("vpc-id is required in self-managed-config")
-	}
-	if config.SubnetID == "" {
-		return "", "", "", fmt.Errorf("subnet-id is required in self-managed-config")
-	}
-	if config.Location == "" {
-		return "", "", "", fmt.Errorf("location is required in self-managed-config")
-	}
-
-	return config.VPCID, config.SubnetID, config.Location, nil
 }

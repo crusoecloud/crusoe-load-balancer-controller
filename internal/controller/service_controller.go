@@ -150,7 +150,17 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 	var vpcID, location string
 	projectId := viper.GetString(CrusoeProjectIDFlag)
 
-	if isCrusoeManagedCluster(svc) {
+	if isSubnetIDProvided() {
+		var subnetID string
+		var err error
+		vpcID, subnetID, location, err = getVPCInfoForSelfManagedCluster(ctx, r.CrusoeClient)
+		if err != nil {
+			logger.Error(err, "Failed to get VPC information from subnet")
+			return ctrl.Result{}, err
+		}
+
+		logger.Info("Retrieved VPC info from subnet", "vpcID", vpcID, "subnetID", subnetID, "location", location)
+	} else {
 		// Use Crusoe cluster information
 		logger.Info("Using Crusoe-managed cluster configuration")
 		cluster, _, err := r.CrusoeClient.KubernetesClustersApi.GetCluster(ctx, projectId, viper.GetString(CrusoeClusterIDFlag))
@@ -165,17 +175,6 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 		}
 		vpcID = subnet.VpcNetworkId
 		location = subnet.Location
-	} else {
-		// Use self-managed cluster configuration from annotations
-		logger.Info("Using self-managed cluster configuration")
-		var subnetID string
-		var err error
-		vpcID, subnetID, location, err = getVPCInfoForSelfManagedCluster(svc)
-		if err != nil {
-			logger.Error(err, "Failed to get VPC information from annotations")
-			return ctrl.Result{}, err
-		}
-		logger.Info("Retrieved VPC info from annotations", "vpcID", vpcID, "subnetID", subnetID, "location", location)
 	}
 
 	apiPayload := crusoeapi.ExternalLoadBalancerPostRequest{

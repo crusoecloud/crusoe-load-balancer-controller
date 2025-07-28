@@ -29,6 +29,7 @@ const (
 	CrusoeClusterIDFlag                 = "crusoe-cluster-id"     //nolint:gosec // false positive, this is a flag name
 	CrusoeProjectIDFlag                 = "crusoe-project-id"
 	CrusoeVPCIDFlag                     = "crusoe-vpc-id"
+	CrusoeSubnetIDFlag                  = "crusoe-subnet-id"
 	NodeNameFlag                        = "node-name"
 )
 
@@ -147,6 +148,9 @@ func BindEnvs() error {
 	}
 	if err := viper.BindEnv(CrusoeClusterIDFlag, "CRUSOE_CLUSTER_ID"); err != nil {
 		return fmt.Errorf("Failed to bind env CRUSOE_CLUSTER_ID: %v", err)
+	}
+	if err := viper.BindEnv(CrusoeSubnetIDFlag, "CRUSOE_SUBNET_ID"); err != nil {
+		return fmt.Errorf("Failed to bind env CRUSOE_SUBNET_ID: %v", err)
 	}
 	return nil
 }
