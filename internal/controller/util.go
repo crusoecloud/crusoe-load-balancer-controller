@@ -24,7 +24,6 @@ const (
 	AnnotationHealthCheckInterval              = "crusoe.ai/health-check-interval"
 	AnnotationHealthCheckSuccessCount          = "crusoe.ai/health-check-success-count"
 	AnnotationHealthCheckTimeout               = "crusoe.ai/health-check-timeout"
-	AnnotationCrusoeManagedCluster             = "crusoe.ai/crusoe-managed-cluster"
 	projectIDEnvKey                            = "CRUSOE_PROJECT_ID"
 	projectIDLabelKey                          = "crusoe.ai/project.id"
 	instanceIDEnvKey                           = "CRUSOE_INSTANCE_ID"
