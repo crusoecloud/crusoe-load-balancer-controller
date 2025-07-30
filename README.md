@@ -18,6 +18,6 @@ Please follow the [Helm installation instructions](https://github.com/crusoeclou
 For Crusoe-managed Kubernetes clusters, the controller automatically detects the cluster and uses the appropriate VPC/subnet information. No additional configuration is required.
 
 ### Self-Managed Clusters
-For self-managed Kubernetes clusters, you need to add specific annotations to your Service objects. See [Self-Managed Clusters Documentation](docs/self-managed-clusters.md) for detailed instructions.
+For self-managed Kubernetes clusters, you just need to pass the subnet id as part of your value.yml when doing the helm install of the controller.
 
 ---
