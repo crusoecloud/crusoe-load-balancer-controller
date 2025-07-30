@@ -20,27 +20,25 @@ import (
 type opStatus string
 
 const (
-	AnnotationHealthCheckFailureCount = "crusoe.ai/health-check-failure-count"
-	AnnotationHealthCheckInterval     = "crusoe.ai/health-check-interval"
-	AnnotationHealthCheckSuccessCount = "crusoe.ai/health-check-success-count"
-	AnnotationHealthCheckTimeout      = "crusoe.ai/health-check-timeout"
-	AnnotationCrusoeManagedCluster    = "crusoe.ai/crusoe-managed-cluster"
-	// Self-managed cluster configuration - only subnet ID needed
-	AnnotationSelfManagedSubnetID          = "crusoe.ai/self-managed.subnet-id"
-	projectIDEnvKey                        = "CRUSOE_PROJECT_ID"
-	projectIDLabelKey                      = "crusoe.ai/project.id"
-	instanceIDEnvKey                       = "CRUSOE_INSTANCE_ID"
-	instanceIDLabelKey                     = "crusoe.ai/instance.id"
-	loadbalancerIDLabelKey                 = "crusoe.ai/load-balancer-id"
-	vmIDFilePath                           = "/sys/class/dmi/id/product_uuid"
-	NodeNameFlag                           = "node-name"
-	OpSuccess                     opStatus = "SUCCEEDED"
-	CrusoeAPIEndpointFlag                  = "crusoe-api-endpoint"
-	CrusoeAccessKeyFlag                    = "crusoe-elb-access-key"
-	CrusoeSecretKeyFlag                    = "crusoe-elb-secret-key" //nolint:gosec // false positive, this is a flag name
-	CrusoeProjectIDFlag                    = "crusoe-project-id"
-	CrusoeVPCIDFlag                        = "crusoe-vpc-id"
-	CrusoeSubnetIDFlag                     = "crusoe-subnet-id"
+	AnnotationHealthCheckFailureCount          = "crusoe.ai/health-check-failure-count"
+	AnnotationHealthCheckInterval              = "crusoe.ai/health-check-interval"
+	AnnotationHealthCheckSuccessCount          = "crusoe.ai/health-check-success-count"
+	AnnotationHealthCheckTimeout               = "crusoe.ai/health-check-timeout"
+	AnnotationCrusoeManagedCluster             = "crusoe.ai/crusoe-managed-cluster"
+	projectIDEnvKey                            = "CRUSOE_PROJECT_ID"
+	projectIDLabelKey                          = "crusoe.ai/project.id"
+	instanceIDEnvKey                           = "CRUSOE_INSTANCE_ID"
+	instanceIDLabelKey                         = "crusoe.ai/instance.id"
+	loadbalancerIDLabelKey                     = "crusoe.ai/load-balancer-id"
+	vmIDFilePath                               = "/sys/class/dmi/id/product_uuid"
+	NodeNameFlag                               = "node-name"
+	OpSuccess                         opStatus = "SUCCEEDED"
+	CrusoeAPIEndpointFlag                      = "crusoe-api-endpoint"
+	CrusoeAccessKeyFlag                        = "crusoe-elb-access-key"
+	CrusoeSecretKeyFlag                        = "crusoe-elb-secret-key" //nolint:gosec // false positive, this is a flag name
+	CrusoeProjectIDFlag                        = "crusoe-project-id"
+	CrusoeVPCIDFlag                            = "crusoe-vpc-id"
+	CrusoeSubnetIDFlag                         = "crusoe-subnet-id"
 )
 
 var (
@@ -259,4 +257,36 @@ func getVPCInfoForSelfManagedCluster(ctx context.Context, crusoeClient *crusoeap
 	location = subnet.Location
 
 	return vpcID, subnetID, location, nil
+}
+
+// getVPCAndLocationInfo determines VPC ID and location based on cluster type (self-managed vs Crusoe-managed)
+func getVPCAndLocationInfo(ctx context.Context, crusoeClient *crusoeapi.APIClient, logger logr.Logger) (vpcID, location string, err error) {
+	if isSubnetIDProvided() {
+		var subnetID string
+		vpcID, subnetID, location, err = getVPCInfoForSelfManagedCluster(ctx, crusoeClient)
+		if err != nil {
+			logger.Error(err, "Failed to get VPC information from subnet")
+			return "", "", err
+		}
+
+		logger.Info("Retrieved VPC info from subnet", "vpcID", vpcID, "subnetID", subnetID, "location", location)
+	} else {
+		// Use Crusoe cluster information
+		logger.Info("Using Crusoe-managed cluster configuration")
+		projectId := viper.GetString(CrusoeProjectIDFlag)
+		cluster, _, err := crusoeClient.KubernetesClustersApi.GetCluster(ctx, projectId, viper.GetString(CrusoeClusterIDFlag))
+		if err != nil {
+			logger.Error(err, "Failed to get cluster", "clusterID", viper.GetString(CrusoeClusterIDFlag))
+			return "", "", err
+		}
+		subnet, _, err := crusoeClient.VPCSubnetsApi.GetVPCSubnet(ctx, projectId, cluster.SubnetId)
+		if err != nil {
+			logger.Error(err, "Failed to get vpc network id from cluster subnet id ", "subnetID", cluster.SubnetId)
+			return "", "", err
+		}
+		vpcID = subnet.VpcNetworkId
+		location = subnet.Location
+	}
+
+	return vpcID, location, nil
 }
