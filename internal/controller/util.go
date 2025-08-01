@@ -235,6 +235,8 @@ func (r *ServiceReconciler) updateLoadBalancer(
 // isSubnetIDProvided checks if the subnet ID environment variable is provided
 func isSubnetIDProvided() bool {
 	subnetID := viper.GetString(CrusoeSubnetIDFlag)
+	logger := log.FromContext(context.Background())
+	logger.Info("Checking subnet ID", "subnetID", subnetID, "isEmpty", subnetID == "")
 	return subnetID != ""
 }
 
@@ -260,7 +262,10 @@ func getVPCInfoForSelfManagedCluster(ctx context.Context, crusoeClient *crusoeap
 
 // getVPCAndLocationInfo determines VPC ID and location based on cluster type (self-managed vs Crusoe-managed)
 func getVPCAndLocationInfo(ctx context.Context, crusoeClient *crusoeapi.APIClient, logger logr.Logger) (vpcID, location string, err error) {
+	logger.Info("Starting getVPCAndLocationInfo")
+
 	if isSubnetIDProvided() {
+		logger.Info("Subnet ID provided, using self-managed cluster path")
 		var subnetID string
 		vpcID, subnetID, location, err = getVPCInfoForSelfManagedCluster(ctx, crusoeClient)
 		if err != nil {
@@ -271,7 +276,7 @@ func getVPCAndLocationInfo(ctx context.Context, crusoeClient *crusoeapi.APIClien
 		logger.Info("Retrieved VPC info from subnet", "vpcID", vpcID, "subnetID", subnetID, "location", location)
 	} else {
 		// Use Crusoe cluster information
-		logger.Info("Using Crusoe-managed cluster configuration")
+		logger.Info("No subnet ID provided, using Crusoe-managed cluster configuration")
 		projectId := viper.GetString(CrusoeProjectIDFlag)
 		cluster, _, err := crusoeClient.KubernetesClustersApi.GetCluster(ctx, projectId, viper.GetString(CrusoeClusterIDFlag))
 		if err != nil {
