@@ -274,23 +274,22 @@ func getVPCAndLocationInfo(ctx context.Context, crusoeClient *crusoeapi.APIClien
 		}
 
 		logger.Info("Retrieved VPC info from subnet", "vpcID", vpcID, "subnetID", subnetID, "location", location)
-	} else {
-		// Use Crusoe cluster information
-		logger.Info("No subnet ID provided, using Crusoe-managed cluster configuration")
-		projectId := viper.GetString(CrusoeProjectIDFlag)
-		cluster, _, err := crusoeClient.KubernetesClustersApi.GetCluster(ctx, projectId, viper.GetString(CrusoeClusterIDFlag))
-		if err != nil {
-			logger.Error(err, "Failed to get cluster", "clusterID", viper.GetString(CrusoeClusterIDFlag))
-			return "", "", err
-		}
-		subnet, _, err := crusoeClient.VPCSubnetsApi.GetVPCSubnet(ctx, projectId, cluster.SubnetId)
-		if err != nil {
-			logger.Error(err, "Failed to get vpc network id from cluster subnet id ", "subnetID", cluster.SubnetId)
-			return "", "", err
-		}
-		vpcID = subnet.VpcNetworkId
-		location = subnet.Location
 	}
+	// Use Crusoe cluster information
+	logger.Info("No subnet ID provided, using Crusoe-managed cluster configuration")
+	projectId := viper.GetString(CrusoeProjectIDFlag)
+	cluster, _, err := crusoeClient.KubernetesClustersApi.GetCluster(ctx, projectId, viper.GetString(CrusoeClusterIDFlag))
+	if err != nil {
+		logger.Error(err, "Failed to get cluster", "clusterID", viper.GetString(CrusoeClusterIDFlag))
+		return "", "", err
+	}
+	subnet, _, err := crusoeClient.VPCSubnetsApi.GetVPCSubnet(ctx, projectId, cluster.SubnetId)
+	if err != nil {
+		logger.Error(err, "Failed to get vpc network id from cluster subnet id ", "subnetID", cluster.SubnetId)
+		return "", "", err
+	}
+	vpcID = subnet.VpcNetworkId
+	location = subnet.Location
 
 	return vpcID, location, err
 }
