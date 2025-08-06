@@ -274,6 +274,8 @@ func getVPCAndLocationInfo(ctx context.Context, crusoeClient *crusoeapi.APIClien
 		}
 
 		logger.Info("Retrieved VPC info from subnet", "vpcID", vpcID, "subnetID", subnetID, "location", location)
+
+		return vpcID, location, nil
 	}
 	// Use Crusoe cluster information
 	logger.Info("No subnet ID provided, using Crusoe-managed cluster configuration")
