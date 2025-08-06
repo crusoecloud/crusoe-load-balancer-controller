@@ -292,5 +292,5 @@ func getVPCAndLocationInfo(ctx context.Context, crusoeClient *crusoeapi.APIClien
 		location = subnet.Location
 	}
 
-	return vpcID, location, nil
+	return vpcID, location, err
 }
