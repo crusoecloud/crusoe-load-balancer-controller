@@ -144,26 +144,20 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 	logger := log.FromContext(ctx)
 
 	listenPortsAndBackends := r.parseListenPortsAndBackends(ctx, svc, logger)
-
 	healthCheckOptions := ParseHealthCheckOptionsFromAnnotations(svc.Annotations)
 
-	// Prepare payload for the API call
-	// get vpc id
+	// Get VPC ID and location information
+	vpcID, location, err := getVPCAndLocationInfo(ctx, r.CrusoeClient, logger)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
 	projectId := viper.GetString(CrusoeProjectIDFlag)
-	cluster, _, err := r.CrusoeClient.KubernetesClustersApi.GetCluster(ctx, projectId, viper.GetString(CrusoeClusterIDFlag))
-	if err != nil {
-		logger.Error(err, "Failed to get cluster", "clusterID", viper.GetString(CrusoeClusterIDFlag))
-		return ctrl.Result{}, err
-	}
-	subnet, _, err := r.CrusoeClient.VPCSubnetsApi.GetVPCSubnet(ctx, projectId, cluster.SubnetId)
-	if err != nil {
-		logger.Error(err, "Failed to get vpc network id from cluster subnet id ", "subnetID", cluster.SubnetId)
-		return ctrl.Result{}, err
-	}
+
 	apiPayload := crusoeapi.ExternalLoadBalancerPostRequest{
-		VpcId:                  subnet.VpcNetworkId,
+		VpcId:                  vpcID,
 		Name:                   svc.Name,
-		Location:               subnet.Location,
+		Location:               location,
 		Protocol:               "LOAD_BALANCER_PROTOCOL_TCP", // only TCP supported currently
 		ListenPortsAndBackends: listenPortsAndBackends,
 		HealthCheckOptions:     healthCheckOptions,
