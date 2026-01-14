@@ -146,6 +146,12 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 	listenPortsAndBackends := r.parseListenPortsAndBackends(ctx, svc, logger)
 	healthCheckOptions := ParseHealthCheckOptionsFromAnnotations(svc.Annotations)
 
+	// Get load balancer name from annotations, fallback to service name if not specified
+	lbName := ParseLoadBalancerNameFromAnnotations(svc.Annotations)
+	if lbName == "" {
+		lbName = svc.Name
+	}
+
 	// Get VPC ID and location information
 	vpcID, location, err := getVPCAndLocationInfo(ctx, r.CrusoeClient, logger)
 	if err != nil {
@@ -156,7 +162,7 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 
 	apiPayload := crusoeapi.ExternalLoadBalancerPostRequest{
 		VpcId:                  vpcID,
-		Name:                   svc.Name,
+		Name:                   lbName,
 		Location:               location,
 		Protocol:               "LOAD_BALANCER_PROTOCOL_TCP", // only TCP supported currently
 		ListenPortsAndBackends: listenPortsAndBackends,
