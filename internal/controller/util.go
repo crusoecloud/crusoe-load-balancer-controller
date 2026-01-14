@@ -24,6 +24,7 @@ const (
 	AnnotationHealthCheckInterval              = "crusoe.ai/health-check-interval"
 	AnnotationHealthCheckSuccessCount          = "crusoe.ai/health-check-success-count"
 	AnnotationHealthCheckTimeout               = "crusoe.ai/health-check-timeout"
+	AnnotationLoadBalancerName                 = "crusoe.ai/load-balancer-name"
 	projectIDEnvKey                            = "CRUSOE_PROJECT_ID"
 	projectIDLabelKey                          = "crusoe.ai/project.id"
 	instanceIDEnvKey                           = "CRUSOE_INSTANCE_ID"
@@ -82,6 +83,14 @@ func ParseHealthCheckOptionsFromAnnotations(annotations map[string]string) *crus
 	}
 
 	return healthCheckOptions
+}
+
+// ParseLoadBalancerNameFromAnnotations extracts the load balancer name from annotations
+func ParseLoadBalancerNameFromAnnotations(annotations map[string]string) string {
+	if name, ok := annotations[AnnotationLoadBalancerName]; ok {
+		return name
+	}
+	return ""
 }
 
 func isNodeReady(node *corev1.Node) bool {
