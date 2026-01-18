@@ -611,3 +611,32 @@ func GetFirewallRuleOperationResult(ctx context.Context, crusoeClient *crusoeapi
 	}
 	return &op, firewallRule, nil
 }
+
+// GenerateLoadBalancerName creates a unique, deterministic name for a load balancer
+// Format: <namespace>-<service-name>-<8-char-hash>
+// Hash is derived from the Kubernetes service UID to ensure global uniqueness
+// Note: Kubernetes service and namespace names are already DNS-1123 compliant (lowercase alphanumeric, '-', '.')
+func GenerateLoadBalancerName(namespace, serviceName, serviceUID string) (string, error) {
+	// Generate hash from service UID
+	// Service UIDs are globally unique across all clusters
+	hash := utils.GenerateServiceHash(serviceUID)
+
+	// Construct name
+	name := fmt.Sprintf("%s-%s-%s", namespace, serviceName, hash)
+
+	// Validate length (must be < 50 chars)
+	if len(name) >= 50 {
+		// Truncate service name to fit within limit
+		maxServiceNameLen := 49 - len(namespace) - len(hash) - 2 // 2 for hyphens, 49 to ensure < 50
+		if maxServiceNameLen < 5 {
+			return "", fmt.Errorf("namespace '%s' is too long to create valid LB name", namespace)
+		}
+		truncatedServiceName := serviceName
+		if len(serviceName) > maxServiceNameLen {
+			truncatedServiceName = serviceName[:maxServiceNameLen]
+		}
+		name = fmt.Sprintf("%s-%s-%s", namespace, truncatedServiceName, hash)
+	}
+
+	return name, nil
+}
