@@ -3,6 +3,7 @@ package utils
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math/big"
@@ -153,4 +154,11 @@ func BindEnvs() error {
 		return fmt.Errorf("Failed to bind env CRUSOE_SUBNET_ID: %v", err)
 	}
 	return nil
+}
+
+// GenerateServiceHash creates an 8-character deterministic hash from a Kubernetes service UID
+// Service UIDs are globally unique (format: UUID), making this hash unique across all clusters
+func GenerateServiceHash(serviceUID string) string {
+	hash := sha256.Sum256([]byte(serviceUID))
+	return fmt.Sprintf("%.8x", hash[:4]) // First 8 hex chars
 }
