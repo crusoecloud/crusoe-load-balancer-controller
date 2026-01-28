@@ -257,7 +257,7 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, logger logr.
 		return nil
 	}
 
-	ruleName := fmt.Sprintf("%s-%s", svc.Name, svc.UID)
+	ruleName := r.MakeFirewallRuleName(svc)
 
 	var sources []swagger.FirewallRuleObject
 	sources = append(sources, swagger.FirewallRuleObject{Cidr: "0.0.0.0/0"})
@@ -359,7 +359,7 @@ func (r *ServiceReconciler) deleteFirewallRule(logger logr.Logger, ctx context.C
 		return fmt.Errorf("project ID is required")
 	}
 
-	ruleName := fmt.Sprintf("%s-%s", svc.Name, svc.UID)
+	ruleName := r.MakeFirewallRuleName(svc)
 
 	resp, _, err := r.CrusoeClient.VPCFirewallRulesApi.ListVPCFirewallRules(ctx, projectId)
 	if err != nil {
@@ -374,9 +374,11 @@ func (r *ServiceReconciler) deleteFirewallRule(logger logr.Logger, ctx context.C
 				logger.Error(err, "Failed to delete firewall rule", "ruleName", ruleName)
 				return err
 			}
-			break
+			return nil
 		}
 	}
+
+	logger.Info("Firewall rule not found, skipping deletion", "ruleName", ruleName)
 	return nil
 }
 
@@ -479,4 +481,8 @@ func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		).
 		Complete(r)
 
+}
+
+func (r *ServiceReconciler) MakeFirewallRuleName(svc *corev1.Service) string {
+	return fmt.Sprintf("%s-%s", svc.Name, svc.UID)
 }
