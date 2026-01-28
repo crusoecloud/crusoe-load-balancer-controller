@@ -163,15 +163,30 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 		ListenPortsAndBackends: listenPortsAndBackends,
 		HealthCheckOptions:     healthCheckOptions,
 	}
+	logger.Info("Creating load balancer", "payload", apiPayload)
 
 	op_resp, http_resp, err := r.CrusoeClient.ExternalLoadBalancersApi.CreateExternalLoadBalancer(ctx, apiPayload, projectId)
 	if err != nil {
 		logger.Error(err, "Failed to create load balancer via API")
-		// Only retry if this is not a client error (4xx)
+
 		if http_resp != nil && http_resp.StatusCode >= 400 && http_resp.StatusCode < 500 {
-			logger.Info("Client error (4xx) detected, will not retry", "statusCode", http_resp.StatusCode)
+
+			if err := r.ensureFirewallRule(ctx, logger, vpcID, projectId, listenPortsAndBackends, svc); err != nil {
+				logger.Error(err, "Failed to ensure firewall rule")
+			}
+			// unpack api response body
+			if ge, ok := err.(swagger.GenericSwaggerError); ok {
+				logger.Info("Client error body", "status", http_resp.Status, "body", string(ge.Body()))
+				return ctrl.Result{}, nil
+			}
+			if gep, ok := err.(*swagger.GenericSwaggerError); ok {
+				logger.Info("Client error body", "status", http_resp.Status, "body", string(gep.Body()))
+				return ctrl.Result{}, nil
+			}
+			logger.Info("Client error (4xx) detected, will not retry", "status", http_resp.Status, "error", err.Error())
 			return ctrl.Result{}, nil
 		}
+
 		return ctrl.Result{}, fmt.Errorf("failed to create load balancer: %w", err)
 	}
 
@@ -224,24 +239,25 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 
 	logger.Info("Stored Load Balancer ID in Service annotations", "service", svc.Name, "loadBalancerID", loadBalancer.Id)
 
+	logger.Info("Ensuring firewall rule", "service", svc.Name)
 	if err := r.ensureFirewallRule(ctx, logger, vpcID, projectId, listenPortsAndBackends, svc); err != nil {
-		return ctrl.Result{}, err
+		logger.Error(err, "Failed to ensure firewall rule")
 	}
 	return ctrl.Result{}, nil
 }
 
 func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, logger logr.Logger, vpcID string,
 	projectID string, listenPortsAndBackends []swagger.ListenPortAndBackend, svc *corev1.Service) error {
-	// if !viper.GetBool(utils.CrusoeCreateFirewallRuleFlag) {
-	// 	return nil
-	// }
+	if !viper.GetBool(utils.CrusoeCreateFirewallRuleFlag) {
+		return nil
+	}
 
 	if projectID == "" {
 		logger.Info("CRUSOE_PROJECT_ID not set, skipping firewall rule creation")
 		return nil
 	}
 
-	ruleName := fmt.Sprintf("%s-%s-firewall", svc.Namespace, svc.Name)
+	ruleName := fmt.Sprintf("%s-%s", svc.Name, svc.UID)
 
 	var sources []swagger.FirewallRuleObject
 	sources = append(sources, swagger.FirewallRuleObject{Cidr: "0.0.0.0/0"})
@@ -292,6 +308,11 @@ func (r *ServiceReconciler) handleDelete(ctx context.Context, svc *corev1.Servic
 
 	loadBalancerID := svc.Annotations[loadbalancerIDLabelKey]
 
+	// delete firewall rule
+	if err := r.deleteFirewallRule(logger, ctx, svc); err != nil {
+		logger.Error(err, "Failed to delete firewall rule", "service", svc.Name, "loadBalancerID", loadBalancerID)
+	}
+
 	// Call the API to delete the load balancer
 	projectId := viper.GetString(CrusoeProjectIDFlag)
 	_, httpResp, err := r.CrusoeClient.ExternalLoadBalancersApi.DeleteExternalLoadBalancer(ctx, projectId, loadBalancerID)
@@ -318,10 +339,6 @@ func (r *ServiceReconciler) handleDelete(ctx context.Context, svc *corev1.Servic
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
 		}
 	}
-	// delete firewall rule
-	// if err := r.deleteFirewallRule(ctx, svc); err != nil {
-	// 	logger.Error(err, "Failed to delete firewall rule", "service", svc.Name, "loadBalancerID", loadBalancerID)
-	// }
 
 	// If err == nil, presumably a 2xx status => success
 	if httpResp != nil && (httpResp.StatusCode == http.StatusOK || httpResp.StatusCode == http.StatusNoContent) {
@@ -334,6 +351,33 @@ func (r *ServiceReconciler) handleDelete(ctx context.Context, svc *corev1.Servic
 
 	return ctrl.Result{RequeueAfter: 10 * time.Second}, err
 
+}
+
+func (r *ServiceReconciler) deleteFirewallRule(logger logr.Logger, ctx context.Context, svc *corev1.Service) error {
+	projectId := viper.GetString(CrusoeProjectIDFlag)
+	if projectId == "" {
+		return fmt.Errorf("project ID is required")
+	}
+
+	ruleName := fmt.Sprintf("%s-%s", svc.Name, svc.UID)
+
+	resp, _, err := r.CrusoeClient.VPCFirewallRulesApi.ListVPCFirewallRules(ctx, projectId)
+	if err != nil {
+		logger.Error(err, "Failed to list firewall rules", "projectId", projectId)
+		return err
+	}
+
+	for _, rule := range resp.Items {
+		if rule.Name == ruleName {
+			_, _, err = r.CrusoeClient.VPCFirewallRulesApi.DeleteVPCFirewallRule(ctx, projectId, rule.Id)
+			if err != nil {
+				logger.Error(err, "Failed to delete firewall rule", "ruleName", ruleName)
+				return err
+			}
+			break
+		}
+	}
+	return nil
 }
 
 // handleUpdate handles updates to a Service of type LoadBalancer
