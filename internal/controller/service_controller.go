@@ -232,19 +232,16 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 
 func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, logger logr.Logger, vpcID string,
 	projectID string, listenPortsAndBackends []swagger.ListenPortAndBackend, svc *corev1.Service) error {
-	if !viper.GetBool(utils.CrusoeCreateFirewallRuleFlag) {
+	// if !viper.GetBool(utils.CrusoeCreateFirewallRuleFlag) {
+	// 	return nil
+	// }
+
+	if projectID == "" {
+		logger.Info("CRUSOE_PROJECT_ID not set, skipping firewall rule creation")
 		return nil
 	}
 
-	if projectID == "" {
-		return fmt.Errorf("CRUSOE_PROJECT_ID must be set")
-	}
-
 	ruleName := fmt.Sprintf("%s-%s-firewall", svc.Namespace, svc.Name)
-	targetSvc := &corev1.Service{}
-	if err := r.Client.Get(ctx, types.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}, targetSvc); err != nil {
-		return fmt.Errorf("failed to get target service %s/%s: %w", svc.Namespace, svc.Name, err)
-	}
 
 	var sources []swagger.FirewallRuleObject
 	sources = append(sources, swagger.FirewallRuleObject{Cidr: "0.0.0.0/0"})
@@ -256,11 +253,12 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, logger logr.
 		}
 	}
 	if len(destinationPorts) == 0 {
-		return fmt.Errorf("no backends found on service %s/%s", targetSvc.Namespace, targetSvc.Name)
+		logger.Info("No backends found, skipping firewall rule creation", "service", svc.Name)
+		return nil
 	}
 
 	var protocols []string
-	protocols = append(protocols, "TCP", "UDP")
+	protocols = append(protocols, "TCP", "UDP") // TODO: Make this configurable
 
 	logger.Info("Creating VPC firewall rule", "name", ruleName, "vpcNetworkId", vpcID, "destinationPorts", destinationPorts, "protocols", protocols)
 	_, httpResp, err := r.CrusoeClient.VPCFirewallRulesApi.CreateVPCFirewallRule(ctx,
@@ -281,7 +279,8 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, logger logr.
 			logger.Info("Firewall rule already exists (409), continuing", "name", ruleName)
 			return nil
 		}
-		return fmt.Errorf("failed to create firewall rule: %w", err)
+		logger.Error(err, "Failed to create firewall rule", "name", ruleName)
+		return nil
 	}
 
 	return nil
