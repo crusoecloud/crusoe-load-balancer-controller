@@ -26,6 +26,7 @@ import (
 
 	crusoeapi "github.com/crusoecloud/client-go/swagger/v1alpha5"
 	swagger "github.com/crusoecloud/client-go/swagger/v1alpha5"
+	"github.com/go-logr/logr"
 	"github.com/ory/viper"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -222,7 +223,68 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 	}
 
 	logger.Info("Stored Load Balancer ID in Service annotations", "service", svc.Name, "loadBalancerID", loadBalancer.Id)
+
+	if err := r.ensureFirewallRule(ctx, logger, vpcID, projectId, listenPortsAndBackends, svc); err != nil {
+		return ctrl.Result{}, err
+	}
 	return ctrl.Result{}, nil
+}
+
+func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, logger logr.Logger, vpcID string,
+	projectID string, listenPortsAndBackends []swagger.ListenPortAndBackend, svc *corev1.Service) error {
+	if !viper.GetBool(utils.CrusoeCreateFirewallRuleFlag) {
+		return nil
+	}
+
+	if projectID == "" {
+		return fmt.Errorf("CRUSOE_PROJECT_ID must be set")
+	}
+
+	ruleName := fmt.Sprintf("%s-%s-firewall", svc.Namespace, svc.Name)
+	targetSvc := &corev1.Service{}
+	if err := r.Client.Get(ctx, types.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}, targetSvc); err != nil {
+		return fmt.Errorf("failed to get target service %s/%s: %w", svc.Namespace, svc.Name, err)
+	}
+
+	var sources []swagger.FirewallRuleObject
+	sources = append(sources, swagger.FirewallRuleObject{Cidr: "0.0.0.0/0"})
+
+	var destinationPorts []string
+	for _, portAndBackend := range listenPortsAndBackends {
+		for _, backend := range portAndBackend.Backends {
+			destinationPorts = append(destinationPorts, fmt.Sprintf("%d", backend.Port))
+		}
+	}
+	if len(destinationPorts) == 0 {
+		return fmt.Errorf("no backends found on service %s/%s", targetSvc.Namespace, targetSvc.Name)
+	}
+
+	var protocols []string
+	protocols = append(protocols, "TCP", "UDP")
+
+	logger.Info("Creating VPC firewall rule", "name", ruleName, "vpcNetworkId", vpcID, "destinationPorts", destinationPorts, "protocols", protocols)
+	_, httpResp, err := r.CrusoeClient.VPCFirewallRulesApi.CreateVPCFirewallRule(ctx,
+		swagger.VpcFirewallRulesPostRequestV1Alpha5{
+			Name:   ruleName,
+			Action: "ALLOW",
+			Destinations: []swagger.FirewallRuleObject{
+				{ResourceId: vpcID},
+			},
+			DestinationPorts: destinationPorts,
+			Protocols:        protocols,
+			VpcNetworkId:     vpcID,
+			Direction:        "INGRESS",
+			Sources:          sources,
+		}, projectID)
+	if err != nil {
+		if httpResp != nil && httpResp.StatusCode == http.StatusConflict {
+			logger.Info("Firewall rule already exists (409), continuing", "name", ruleName)
+			return nil
+		}
+		return fmt.Errorf("failed to create firewall rule: %w", err)
+	}
+
+	return nil
 }
 
 // handleDelete handles cleanup logic for a Service marked for deletion
@@ -257,6 +319,10 @@ func (r *ServiceReconciler) handleDelete(ctx context.Context, svc *corev1.Servic
 			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
 		}
 	}
+	// delete firewall rule
+	// if err := r.deleteFirewallRule(ctx, svc); err != nil {
+	// 	logger.Error(err, "Failed to delete firewall rule", "service", svc.Name, "loadBalancerID", loadBalancerID)
+	// }
 
 	// If err == nil, presumably a 2xx status => success
 	if httpResp != nil && (httpResp.StatusCode == http.StatusOK || httpResp.StatusCode == http.StatusNoContent) {

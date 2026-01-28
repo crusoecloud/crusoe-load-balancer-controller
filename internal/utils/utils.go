@@ -19,18 +19,19 @@ import (
 type opStatus string
 
 const (
-	maxBackOffSeconds                   = 8
-	spinnerWaitTimeMilliSecond          = 400
-	jitterRangeMilliSecond              = 1000
-	OpInProgress               opStatus = "IN_PROGRESS"
-	CrusoeAPIEndpointFlag               = "crusoe-api-endpoint"
-	CrusoeAccessKeyFlag                 = "crusoe-elb-access-key"
-	CrusoeSecretKeyFlag                 = "crusoe-elb-secret-key" //nolint:gosec // false positive, this is a flag name
-	CrusoeClusterIDFlag                 = "crusoe-cluster-id"     //nolint:gosec // false positive, this is a flag name
-	CrusoeProjectIDFlag                 = "crusoe-project-id"
-	CrusoeVPCIDFlag                     = "crusoe-vpc-id"
-	CrusoeSubnetIDFlag                  = "crusoe-subnet-id"
-	NodeNameFlag                        = "node-name"
+	maxBackOffSeconds                     = 8
+	spinnerWaitTimeMilliSecond            = 400
+	jitterRangeMilliSecond                = 1000
+	OpInProgress                 opStatus = "IN_PROGRESS"
+	CrusoeAPIEndpointFlag                 = "crusoe-api-endpoint"
+	CrusoeAccessKeyFlag                   = "crusoe-elb-access-key"
+	CrusoeSecretKeyFlag                   = "crusoe-elb-secret-key" //nolint:gosec // false positive, this is a flag name
+	CrusoeClusterIDFlag                   = "crusoe-cluster-id"     //nolint:gosec // false positive, this is a flag name
+	CrusoeProjectIDFlag                   = "crusoe-project-id"
+	CrusoeVPCIDFlag                       = "crusoe-vpc-id"
+	CrusoeSubnetIDFlag                    = "crusoe-subnet-id"
+	CrusoeCreateFirewallRuleFlag          = "crusoe-create-firewall-rule"
+	NodeNameFlag                          = "node-name"
 )
 
 var (
@@ -151,6 +152,9 @@ func BindEnvs() error {
 	}
 	if err := viper.BindEnv(CrusoeSubnetIDFlag, "CRUSOE_SUBNET_ID"); err != nil {
 		return fmt.Errorf("Failed to bind env CRUSOE_SUBNET_ID: %v", err)
+	}
+	if err := viper.BindEnv(CrusoeCreateFirewallRuleFlag, "CRUSOE_CREATE_FIREWALL_RULE"); err != nil {
+		return fmt.Errorf("Failed to bind env CRUSOE_CREATE_FIREWALL_RULE: %v", err)
 	}
 	return nil
 }
