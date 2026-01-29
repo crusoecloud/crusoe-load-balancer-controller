@@ -20,24 +20,28 @@ import (
 type opStatus string
 
 const (
-	AnnotationHealthCheckFailureCount          = "crusoe.ai/health-check-failure-count"
-	AnnotationHealthCheckInterval              = "crusoe.ai/health-check-interval"
-	AnnotationHealthCheckSuccessCount          = "crusoe.ai/health-check-success-count"
-	AnnotationHealthCheckTimeout               = "crusoe.ai/health-check-timeout"
-	projectIDEnvKey                            = "CRUSOE_PROJECT_ID"
-	projectIDLabelKey                          = "crusoe.ai/project.id"
-	instanceIDEnvKey                           = "CRUSOE_INSTANCE_ID"
-	instanceIDLabelKey                         = "crusoe.ai/instance.id"
-	loadbalancerIDLabelKey                     = "crusoe.ai/load-balancer-id"
-	vmIDFilePath                               = "/sys/class/dmi/id/product_uuid"
-	NodeNameFlag                               = "node-name"
-	OpSuccess                         opStatus = "SUCCEEDED"
-	CrusoeAPIEndpointFlag                      = "crusoe-api-endpoint"
-	CrusoeAccessKeyFlag                        = "crusoe-elb-access-key"
-	CrusoeSecretKeyFlag                        = "crusoe-elb-secret-key" //nolint:gosec // false positive, this is a flag name
-	CrusoeProjectIDFlag                        = "crusoe-project-id"
-	CrusoeVPCIDFlag                            = "crusoe-vpc-id"
-	CrusoeSubnetIDFlag                         = "crusoe-subnet-id"
+	AnnotationHealthCheckFailureCount              = "crusoe.ai/health-check-failure-count"
+	AnnotationHealthCheckInterval                  = "crusoe.ai/health-check-interval"
+	AnnotationHealthCheckSuccessCount              = "crusoe.ai/health-check-success-count"
+	AnnotationHealthCheckTimeout                   = "crusoe.ai/health-check-timeout"
+	projectIDEnvKey                                = "CRUSOE_PROJECT_ID"
+	projectIDLabelKey                              = "crusoe.ai/project.id"
+	instanceIDEnvKey                               = "CRUSOE_INSTANCE_ID"
+	instanceIDLabelKey                             = "crusoe.ai/instance.id"
+	loadbalancerIDLabelKey                         = "crusoe.ai/load-balancer-id"
+	CreateFirewallRuleAnnotationKey                = "crusoe.ai/create-firewall-rule"
+	CreateFirewallRuleAnnotationSources            = "crusoe.ai/create-firewall-rule-sources"
+	CreateFirewallRuleAnnotationProtocols          = "crusoe.ai/create-firewall-rule-protocols"
+	FirewallRuleIdKey                              = "crusoe.ai/firewall-rule-id"
+	vmIDFilePath                                   = "/sys/class/dmi/id/product_uuid"
+	NodeNameFlag                                   = "node-name"
+	OpSuccess                             opStatus = "SUCCEEDED"
+	CrusoeAPIEndpointFlag                          = "crusoe-api-endpoint"
+	CrusoeAccessKeyFlag                            = "crusoe-elb-access-key"
+	CrusoeSecretKeyFlag                            = "crusoe-elb-secret-key" //nolint:gosec // false positive, this is a flag name
+	CrusoeProjectIDFlag                            = "crusoe-project-id"
+	CrusoeVPCIDFlag                                = "crusoe-vpc-id"
+	CrusoeSubnetIDFlag                             = "crusoe-subnet-id"
 )
 
 var (

@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	utils "lb_controller/internal/utils"
@@ -170,22 +169,6 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 		logger.Error(err, "Failed to create load balancer via API")
 		// Only retry if this is not a client error (4xx)
 		if http_resp != nil && http_resp.StatusCode >= 400 && http_resp.StatusCode < 500 {
-			// unpack api response body
-			var errorBody string
-			if ge, ok := err.(swagger.GenericSwaggerError); ok {
-				logger.Info("Client error body", "status", http_resp.Status, "body", string(ge.Body()))
-				errorBody = string(ge.Body())
-			} else if gep, ok := err.(*swagger.GenericSwaggerError); ok {
-				logger.Info("Client error body", "status", http_resp.Status, "body", string(gep.Body()))
-				errorBody = string(gep.Body())
-				return ctrl.Result{}, nil
-			}
-			if strings.Contains(errorBody, "already exists") {
-				logger.Info("Load balancer already exists, ensuring firewall rule", "status", http_resp.Status, "error", err.Error())
-				if err := r.ensureFirewallRule(ctx, vpcID, projectId, listenPortsAndBackends, svc); err != nil {
-					logger.Error(err, "Failed to ensure firewall rule")
-				}
-			}
 			logger.Info("Client error (4xx) detected, will not retry", "status", http_resp.Status, "error", err.Error())
 			return ctrl.Result{}, nil
 		}
@@ -242,30 +225,40 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 
 	logger.Info("Stored Load Balancer ID in Service annotations", "service", svc.Name, "loadBalancerID", loadBalancer.Id)
 
-	logger.Info("Ensuring firewall rule", "service", svc.Name)
-	if err := r.ensureFirewallRule(ctx, vpcID, projectId, listenPortsAndBackends, svc); err != nil {
-		logger.Error(err, "Failed to ensure firewall rule")
-	}
 	return ctrl.Result{}, nil
 }
 
-func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, vpcID string,
-	projectID string, listenPortsAndBackends []swagger.ListenPortAndBackend, svc *corev1.Service) error {
+func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.Service) error {
 	logger := log.FromContext(ctx)
 
-	if !viper.GetBool(utils.CrusoeCreateFirewallRuleFlag) {
+	if _, exists := svc.Annotations[FirewallRuleIdKey]; exists {
+		logger.Info("Firewall rule already exists")
 		return nil
 	}
 
+	projectID := viper.GetString(CrusoeProjectIDFlag)
 	if projectID == "" {
 		logger.Info("CRUSOE_PROJECT_ID not set, skipping firewall rule creation")
 		return nil
 	}
 
+	vpcID, _, err := getVPCAndLocationInfo(ctx, r.CrusoeClient, logger)
+	if err != nil {
+		logger.Error(err, "Failed to get VPC info, skipping firewall rule creation")
+		return nil
+	}
+
 	ruleName := r.MakeFirewallRuleName(svc)
 	sources := []swagger.FirewallRuleObject{{Cidr: "0.0.0.0/0"}}
-	protocols := []string{"TCP", "UDP"} // TODO: Make this configurable
+	if source, exists := svc.Annotations[CreateFirewallRuleAnnotationSources]; exists {
+		sources = []swagger.FirewallRuleObject{{Cidr: source}}
+	}
+	protocols := []string{"TCP", "UDP"}
+	if protocol, exists := svc.Annotations[CreateFirewallRuleAnnotationProtocols]; exists {
+		protocols = []string{protocol}
+	}
 
+	listenPortsAndBackends := r.parseListenPortsAndBackends(ctx, svc, logger)
 	var destinationPorts []string
 	for _, portAndBackend := range listenPortsAndBackends {
 		for _, backend := range portAndBackend.Backends {
@@ -293,14 +286,29 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, vpcID string
 		}, projectID)
 	if err != nil {
 		if httpResp != nil && httpResp.StatusCode == http.StatusConflict {
-			logger.Info("Firewall rule already exists (409), continuing", "name", ruleName)
+			logger.Info("Firewall rule already exists (409), adding ID to service annotations", "name", ruleName)
+		} else {
+			logger.Error(err, "Failed to create firewall rule", "name", ruleName)
 			return nil
 		}
-		logger.Error(err, "Failed to create firewall rule", "name", ruleName)
-		return nil
 	}
 
-	return nil
+	var ruleID string
+	firewallRules, _, err := r.CrusoeClient.VPCFirewallRulesApi.ListVPCFirewallRules(ctx, projectID)
+	if err != nil {
+		logger.Error(err, "Failed to get firewall rule ID", "name", ruleName)
+		return nil
+	}
+	for _, firewallRule := range firewallRules.Items {
+		if firewallRule.Name == ruleName {
+			ruleID = firewallRule.Id
+			svc.Annotations[FirewallRuleIdKey] = ruleID
+			break
+		}
+	}
+
+	logger.Info("Created firewall rule", "name", ruleName, "id", ruleID)
+	return r.Update(ctx, svc)
 }
 
 // handleDelete handles cleanup logic for a Service marked for deletion
@@ -362,26 +370,18 @@ func (r *ServiceReconciler) deleteFirewallRule(ctx context.Context, svc *corev1.
 		return fmt.Errorf("project ID is required")
 	}
 
-	ruleName := r.MakeFirewallRuleName(svc)
-
-	resp, _, err := r.CrusoeClient.VPCFirewallRulesApi.ListVPCFirewallRules(ctx, projectId)
+	ruleID := svc.Annotations[FirewallRuleIdKey]
+	if ruleID == "" {
+		logger.Info("Firewall rule ID not found, skipping deletion", "service", svc.Name)
+		return nil
+	}
+	_, _, err := r.CrusoeClient.VPCFirewallRulesApi.DeleteVPCFirewallRule(ctx, projectId, ruleID)
 	if err != nil {
-		logger.Error(err, "Failed to list firewall rules", "projectId", projectId)
+		logger.Error(err, "Failed to delete firewall rule", "ruleID", ruleID)
 		return err
 	}
 
-	for _, rule := range resp.Items {
-		if rule.Name == ruleName {
-			_, _, err = r.CrusoeClient.VPCFirewallRulesApi.DeleteVPCFirewallRule(ctx, projectId, rule.Id)
-			if err != nil {
-				logger.Error(err, "Failed to delete firewall rule", "ruleName", ruleName)
-				return err
-			}
-			return nil
-		}
-	}
-
-	logger.Info("Firewall rule not found, skipping deletion", "ruleName", ruleName)
+	logger.Info("Deleted firewall rule", "ruleID", ruleID)
 	return nil
 }
 
@@ -393,6 +393,13 @@ func (r *ServiceReconciler) handleUpdate(ctx context.Context, svc *corev1.Servic
 	if err := r.updateLoadBalancer(ctx, svc, logger); err != nil {
 		// Could choose to requeue on errors
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+
+	// Ensure firewall rule has been created if annotation is set to true
+	if val, exists := svc.Annotations[CreateFirewallRuleAnnotationKey]; exists && val == "true" {
+		if err := r.ensureFirewallRule(ctx, svc); err != nil {
+			logger.Error(err, "Failed to ensure firewall rule")
+		}
 	}
 
 	logger.Info("Successfully handled update for ELB", "service", svc.Name)
@@ -488,5 +495,5 @@ func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 func (r *ServiceReconciler) MakeFirewallRuleName(svc *corev1.Service) string {
 	clusterID := viper.GetString(utils.CrusoeClusterIDFlag)
-	return fmt.Sprintf("%s-%s-%s", svc.Name, svc.Namespace, clusterID)
+	return fmt.Sprintf("%s-%s-%s", svc.Name, svc.Namespace, clusterID[5:])
 }
