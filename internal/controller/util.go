@@ -32,7 +32,7 @@ const (
 	CreateFirewallRuleAnnotationKey                = "crusoe.ai/create-firewall-rule"
 	CreateFirewallRuleAnnotationSources            = "crusoe.ai/create-firewall-rule-sources"
 	CreateFirewallRuleAnnotationProtocols          = "crusoe.ai/create-firewall-rule-protocols"
-	FirewallRuleIdKey                              = "crusoe.ai/firewall-rule-id"
+	FirewallRuleNameKey                            = "crusoe.ai/firewall-rule-name"
 	vmIDFilePath                                   = "/sys/class/dmi/id/product_uuid"
 	NodeNameFlag                                   = "node-name"
 	OpSuccess                             opStatus = "SUCCEEDED"
