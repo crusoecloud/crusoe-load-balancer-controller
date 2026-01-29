@@ -169,10 +169,9 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 		logger.Error(err, "Failed to create load balancer via API")
 		// Only retry if this is not a client error (4xx)
 		if http_resp != nil && http_resp.StatusCode >= 400 && http_resp.StatusCode < 500 {
-			logger.Info("Client error (4xx) detected, will not retry", "status", http_resp.Status, "error", err.Error())
+			logger.Info("Client error (4xx) detected, will not retry", "statusCode", http_resp.StatusCode)
 			return ctrl.Result{}, nil
 		}
-
 		return ctrl.Result{}, fmt.Errorf("failed to create load balancer: %w", err)
 	}
 
@@ -224,7 +223,6 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 	}
 
 	logger.Info("Stored Load Balancer ID in Service annotations", "service", svc.Name, "loadBalancerID", loadBalancer.Id)
-
 	return ctrl.Result{}, nil
 }
 
