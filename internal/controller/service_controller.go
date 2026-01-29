@@ -223,6 +223,14 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 	}
 
 	logger.Info("Stored Load Balancer ID in Service annotations", "service", svc.Name, "loadBalancerID", loadBalancer.Id)
+
+	// Ensure firewall rule has been created if annotation is set to true
+	if val, exists := svc.Annotations[CreateFirewallRuleAnnotationKey]; exists && val == "true" {
+		if err := r.ensureFirewallRule(ctx, svc); err != nil {
+			logger.Error(err, "Failed to ensure firewall rule")
+		}
+	}
+
 	return ctrl.Result{}, nil
 }
 
