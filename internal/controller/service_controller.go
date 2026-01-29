@@ -231,7 +231,7 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.Service) error {
 	logger := log.FromContext(ctx)
 
-	if _, exists := svc.Annotations[FirewallRuleNameKey]; exists {
+	if _, exists := svc.Annotations[FirewallRuleIdKey]; exists {
 		logger.Info("Firewall rule already exists")
 		return nil
 	}
@@ -293,8 +293,21 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 		}
 	}
 
-	svc.Annotations[FirewallRuleNameKey] = ruleName
-	logger.Info("Created firewall rule", "name", ruleName)
+	var ruleID string
+	firewallRules, _, err := r.CrusoeClient.VPCFirewallRulesApi.ListVPCFirewallRules(ctx, projectID)
+	if err != nil {
+		logger.Error(err, "Failed to get firewall rule ID", "name", ruleName)
+		return nil
+	}
+	for _, firewallRule := range firewallRules.Items {
+		if firewallRule.Name == ruleName {
+			ruleID = firewallRule.Id
+			svc.Annotations[FirewallRuleIdKey] = ruleID
+			break
+		}
+	}
+
+	logger.Info("Created firewall rule", "name", ruleName, "id", ruleID)
 	return r.Update(ctx, svc)
 }
 
@@ -357,30 +370,18 @@ func (r *ServiceReconciler) deleteFirewallRule(ctx context.Context, svc *corev1.
 		return fmt.Errorf("project ID is required")
 	}
 
-	ruleName := svc.Annotations[FirewallRuleNameKey]
-	if ruleName == "" {
-		logger.Info("Firewall rule name not found, skipping deletion", "service", svc.Name)
+	ruleID := svc.Annotations[FirewallRuleIdKey]
+	if ruleID == "" {
+		logger.Info("Firewall rule ID not found, skipping deletion", "service", svc.Name)
 		return nil
 	}
-
-	firewallRules, _, err := r.CrusoeClient.VPCFirewallRulesApi.ListVPCFirewallRules(ctx, projectId)
+	_, _, err := r.CrusoeClient.VPCFirewallRulesApi.DeleteVPCFirewallRule(ctx, projectId, ruleID)
 	if err != nil {
-		logger.Error(err, "Failed to list firewall rules", "ruleName", ruleName)
+		logger.Error(err, "Failed to delete firewall rule", "ruleID", ruleID)
 		return err
 	}
 
-	for _, rule := range firewallRules.Items {
-		if rule.Name == ruleName {
-			_, _, err = r.CrusoeClient.VPCFirewallRulesApi.DeleteVPCFirewallRule(ctx, projectId, rule.Id)
-			if err != nil {
-				logger.Error(err, "Failed to delete firewall rule", "ruleName", ruleName)
-				return err
-			}
-			break
-		}
-	}
-
-	logger.Info("Deleted firewall rule", "ruleName", ruleName)
+	logger.Info("Deleted firewall rule", "ruleID", ruleID)
 	return nil
 }
 
