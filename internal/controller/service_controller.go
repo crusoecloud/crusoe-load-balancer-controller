@@ -500,6 +500,7 @@ func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 func (r *ServiceReconciler) MakeFirewallRuleName(svc *corev1.Service) string {
+	// TODO: Use GenerateLoadBalancerName once merged in
 	clusterID := viper.GetString(utils.CrusoeClusterIDFlag)
 	return fmt.Sprintf("%s-%s-%s", svc.Name, svc.Namespace, clusterID[len(clusterID)-5:])
 }
