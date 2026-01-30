@@ -400,7 +400,7 @@ func (r *ServiceReconciler) deleteFirewallRule(ctx context.Context, svc *corev1.
 	}
 
 	var ruleID string
-	if ruleID, exists := svc.Annotations[FirewallRuleIdKey]; !exists || ruleID == "" {
+	if existingRuleID, exists := svc.Annotations[FirewallRuleIdKey]; !exists || existingRuleID == "" {
 		if operationID, exists := svc.Annotations[FirewallRuleOperationIdKey]; !exists {
 			logger.Info("Firewall rule operation ID not found, skipping deletion", "service", svc.Name)
 			return nil
@@ -412,10 +412,16 @@ func (r *ServiceReconciler) deleteFirewallRule(ctx context.Context, svc *corev1.
 			}
 			ruleID = firewallRuleId
 		}
+	} else {
+		ruleID = existingRuleID
 	}
 
-	_, _, err := r.CrusoeClient.VPCFirewallRulesApi.DeleteVPCFirewallRule(ctx, projectId, ruleID)
+	_, httpResp, err := r.CrusoeClient.VPCFirewallRulesApi.DeleteVPCFirewallRule(ctx, projectId, ruleID)
 	if err != nil {
+		if httpResp != nil && httpResp.StatusCode == http.StatusNotFound {
+			logger.Info("Firewall rule not found (404), assuming already deleted", "ruleID", ruleID)
+			return nil
+		}
 		logger.Error(err, "Failed to delete firewall rule", "ruleID", ruleID)
 		return err
 	}
