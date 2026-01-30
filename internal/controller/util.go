@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"lb_controller/internal/crusoe"
 	utils "lb_controller/internal/utils"
+	"net/http"
 	"strconv"
 
 	crusoeapi "github.com/crusoecloud/client-go/swagger/v1alpha5"
@@ -32,6 +33,7 @@ const (
 	CreateFirewallRuleAnnotationKey                = "crusoe.ai/create-firewall-rule"
 	CreateFirewallRuleAnnotationSources            = "crusoe.ai/create-firewall-rule-sources"
 	CreateFirewallRuleAnnotationProtocols          = "crusoe.ai/create-firewall-rule-protocols"
+	FirewallRuleOperationIdKey                     = "crusoe.ai/firewall-rule-operation-id"
 	FirewallRuleIdKey                              = "crusoe.ai/firewall-rule-id"
 	vmIDFilePath                                   = "/sys/class/dmi/id/product_uuid"
 	NodeNameFlag                                   = "node-name"
@@ -298,4 +300,152 @@ func getVPCAndLocationInfo(ctx context.Context, crusoeClient *crusoeapi.APIClien
 	location = subnet.Location
 
 	return vpcID, location, err
+}
+
+func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.Service) error {
+	if val, exists := svc.Annotations[CreateFirewallRuleAnnotationKey]; !exists || val != "true" {
+		return nil
+	}
+
+	logger := log.FromContext(ctx)
+
+	if _, exists := svc.Annotations[FirewallRuleIdKey]; exists {
+		logger.Info("Firewall rule ID already exists, skipping creation")
+		return nil
+	}
+	if operationID, exists := svc.Annotations[FirewallRuleOperationIdKey]; exists {
+		logger.Info("Firewall rule operation exists, checking status")
+
+		// check if operation is complete
+		op, firewallRuleId, err := GetFirewallRuleOperationResult(ctx, r.CrusoeClient, operationID)
+		if err != nil {
+			logger.Error(err, "Failed to get firewall rule operation result")
+			return nil
+		}
+		if op != nil && op.State == "FAILED" {
+			logger.Info("Firewall rule operation failed, retrying")
+			delete(svc.Annotations, FirewallRuleOperationIdKey)
+		} else {
+			logger.Info("Firewall rule operation complete", "ruleID", firewallRuleId)
+			svc.Annotations[FirewallRuleIdKey] = firewallRuleId
+			return r.Update(ctx, svc)
+		}
+	}
+
+	projectID := viper.GetString(CrusoeProjectIDFlag)
+	if projectID == "" {
+		logger.Info("CRUSOE_PROJECT_ID not set, skipping firewall rule creation")
+		return nil
+	}
+
+	vpcID, _, err := getVPCAndLocationInfo(ctx, r.CrusoeClient, logger)
+	if err != nil {
+		logger.Error(err, "Failed to get VPC info, skipping firewall rule creation")
+		return nil
+	}
+
+	ruleName := MakeFirewallRuleName(svc)
+	sources := []swagger.FirewallRuleObject{{Cidr: "0.0.0.0/0"}}
+	if source, exists := svc.Annotations[CreateFirewallRuleAnnotationSources]; exists {
+		sources = []swagger.FirewallRuleObject{{Cidr: source}}
+	}
+	protocols := []string{"TCP", "UDP"}
+	if protocol, exists := svc.Annotations[CreateFirewallRuleAnnotationProtocols]; exists {
+		protocols = []string{protocol}
+	}
+
+	listenPortsAndBackends := r.parseListenPortsAndBackends(ctx, svc, logger)
+	var destinationPorts []string
+	for _, portAndBackend := range listenPortsAndBackends {
+		for _, backend := range portAndBackend.Backends {
+			destinationPorts = append(destinationPorts, fmt.Sprintf("%d", backend.Port))
+		}
+	}
+	if len(destinationPorts) == 0 {
+		logger.Info("No backends found, skipping firewall rule creation", "service", svc.Name)
+		return nil
+	}
+
+	logger.Info("Creating VPC firewall rule", "name", ruleName, "vpcNetworkId", vpcID, "destinationPorts", destinationPorts, "protocols", protocols)
+	op_resp, _, err := r.CrusoeClient.VPCFirewallRulesApi.CreateVPCFirewallRule(ctx,
+		swagger.VpcFirewallRulesPostRequestV1Alpha5{
+			Name:   ruleName,
+			Action: "ALLOW",
+			Destinations: []swagger.FirewallRuleObject{
+				{ResourceId: vpcID},
+			},
+			DestinationPorts: destinationPorts,
+			Protocols:        protocols,
+			VpcNetworkId:     vpcID,
+			Direction:        "INGRESS",
+			Sources:          sources,
+		}, projectID)
+	if err != nil {
+		logger.Error(err, "Failed to create firewall rule", "name", ruleName)
+		return nil
+	}
+
+	svc.Annotations[FirewallRuleOperationIdKey] = op_resp.Operation.OperationId
+
+	logger.Info("Created firewall rule", "name", ruleName, "operationId", op_resp.Operation.OperationId)
+	return r.Update(ctx, svc)
+}
+
+func (r *ServiceReconciler) deleteFirewallRule(ctx context.Context, svc *corev1.Service) error {
+	logger := log.FromContext(ctx)
+
+	projectId := viper.GetString(CrusoeProjectIDFlag)
+	if projectId == "" {
+		return fmt.Errorf("project ID is required")
+	}
+
+	var ruleID string
+	if ruleID, exists := svc.Annotations[FirewallRuleIdKey]; !exists || ruleID == "" {
+		if operationID, exists := svc.Annotations[FirewallRuleOperationIdKey]; !exists {
+			logger.Info("Firewall rule operation ID not found, skipping deletion", "service", svc.Name)
+			return nil
+		} else {
+			_, firewallRuleId, err := GetFirewallRuleOperationResult(ctx, r.CrusoeClient, operationID)
+			if err != nil || firewallRuleId == "" {
+				logger.Error(err, "Firewall rule not found or operation failed")
+				return nil
+			}
+			ruleID = firewallRuleId
+		}
+	}
+
+	_, _, err := r.CrusoeClient.VPCFirewallRulesApi.DeleteVPCFirewallRule(ctx, projectId, ruleID)
+	if err != nil {
+		logger.Error(err, "Failed to delete firewall rule", "ruleID", ruleID)
+		return err
+	}
+
+	logger.Info("Deleted firewall rule", "ruleID", ruleID)
+	return nil
+}
+
+func MakeFirewallRuleName(svc *corev1.Service) string {
+	// TODO: Use GenerateLoadBalancerName once merged in
+	clusterID := viper.GetString(utils.CrusoeClusterIDFlag)
+	return fmt.Sprintf("%s-%s-%s", svc.Name, svc.Namespace, clusterID[len(clusterID)-5:])
+}
+
+func GetFirewallRuleOperationResult(ctx context.Context, crusoeClient *crusoeapi.APIClient, operationID string) (
+	*swagger.Operation, string, error,
+) {
+	op, httpResp, err := crusoeClient.VPCFirewallRuleOperationsApi.GetNetworkingVPCFirewallRulesOperation(
+		ctx, viper.GetString(utils.CrusoeProjectIDFlag), operationID,
+	)
+	if err != nil {
+		return nil, "", err
+	}
+	if httpResp.StatusCode != http.StatusOK {
+		return nil, "", fmt.Errorf("failed to get firewall rule operation: %v", httpResp)
+	}
+
+	firewallRule, err := OpResultToItem[swagger.VpcFirewallRule](op.Result)
+	if err != nil {
+		return nil, "", err
+	}
+	return &op, firewallRule.Id, nil
 }
