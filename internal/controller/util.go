@@ -334,43 +334,7 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 		}
 	}
 
-	projectID := viper.GetString(CrusoeProjectIDFlag)
-	if projectID == "" {
-		logger.Info("CRUSOE_PROJECT_ID not set, skipping firewall rule creation")
-		return nil
-	}
-
-	vpcID, _, err := getVPCAndLocationInfo(ctx, r.CrusoeClient, logger)
-	if err != nil {
-		logger.Error(err, "Failed to get VPC info, skipping firewall rule creation")
-		return nil
-	}
-
-	ruleName := MakeFirewallRuleName(svc)
-	sources := []swagger.FirewallRuleObject{{Cidr: "0.0.0.0/0"}}
-	if source, exists := svc.Annotations[CreateFirewallRuleAnnotationSources]; exists {
-		sources = []swagger.FirewallRuleObject{{Cidr: source}}
-	}
-	protocols := []string{"TCP", "UDP"}
-	if protocol, exists := svc.Annotations[CreateFirewallRuleAnnotationProtocols]; exists {
-		protocols = []string{protocol}
-	}
-
-	var destinationPorts []string
-	if destinationPortsStr, exists := svc.Annotations[CreateFirewallRuleAnnotationDestinationPorts]; exists {
-		destinationPorts = strings.Split(destinationPortsStr, ",")
-	} else {
-		listenPortsAndBackends := r.parseListenPortsAndBackends(ctx, svc, logger)
-		for _, portAndBackend := range listenPortsAndBackends {
-			for _, backend := range portAndBackend.Backends {
-				destinationPorts = append(destinationPorts, fmt.Sprintf("%d", backend.Port))
-			}
-		}
-		if len(destinationPorts) == 0 {
-			logger.Info("No backends found, skipping firewall rule creation", "service", svc.Name)
-			return nil
-		}
-	}
+	projectID, vpcID, ruleName, destinationPorts, protocols, sources := r.GetFirewallRuleArgs(ctx, svc)
 
 	logger.Info("Creating VPC firewall rule", "name", ruleName, "vpcNetworkId", vpcID, "destinationPorts", destinationPorts, "protocols", protocols)
 	op_resp, _, err := r.CrusoeClient.VPCFirewallRulesApi.CreateVPCFirewallRule(ctx,
@@ -435,7 +399,51 @@ func (r *ServiceReconciler) deleteFirewallRule(ctx context.Context, svc *corev1.
 	logger.Info("Deleted firewall rule", "ruleID", ruleID)
 	delete(svc.Annotations, FirewallRuleIdKey)
 	delete(svc.Annotations, FirewallRuleOperationIdKey)
-	return nil
+	return r.Update(ctx, svc)
+}
+
+func (r *ServiceReconciler) GetFirewallRuleArgs(ctx context.Context, svc *corev1.Service) (projectID string,
+	vpcID string, ruleName string, destinationPorts []string, protocols []string, sources []swagger.FirewallRuleObject) {
+	logger := log.FromContext(ctx)
+	projectID = viper.GetString(CrusoeProjectIDFlag)
+	if projectID == "" {
+		logger.Info("CRUSOE_PROJECT_ID not set, skipping firewall rule creation")
+		return "", "", "", nil, nil, nil
+	}
+
+	vpcID, _, err := getVPCAndLocationInfo(ctx, r.CrusoeClient, logger)
+	if err != nil {
+		logger.Error(err, "Failed to get VPC info, skipping firewall rule creation")
+		return "", "", "", nil, nil, nil
+	}
+
+	ruleName = MakeFirewallRuleName(svc)
+
+	sources = []swagger.FirewallRuleObject{{Cidr: "0.0.0.0/0"}}
+	if source, exists := svc.Annotations[CreateFirewallRuleAnnotationSources]; exists {
+		sources = []swagger.FirewallRuleObject{{Cidr: source}}
+	}
+	protocols = []string{"TCP", "UDP"}
+	if protocol, exists := svc.Annotations[CreateFirewallRuleAnnotationProtocols]; exists {
+		protocols = []string{protocol}
+	}
+
+	if destinationPortsStr, exists := svc.Annotations[CreateFirewallRuleAnnotationDestinationPorts]; exists {
+		destinationPorts = strings.Split(destinationPortsStr, ",")
+	} else {
+		listenPortsAndBackends := r.parseListenPortsAndBackends(ctx, svc, logger)
+		for _, portAndBackend := range listenPortsAndBackends {
+			for _, backend := range portAndBackend.Backends {
+				destinationPorts = append(destinationPorts, fmt.Sprintf("%d", backend.Port))
+			}
+		}
+		if len(destinationPorts) == 0 {
+			logger.Info("No backends found, skipping firewall rule creation", "service", svc.Name)
+			return "", "", "", nil, nil, nil
+		}
+	}
+
+	return projectID, vpcID, ruleName, destinationPorts, protocols, sources
 }
 
 func MakeFirewallRuleName(svc *corev1.Service) string {
