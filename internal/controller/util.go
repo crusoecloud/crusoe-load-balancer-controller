@@ -427,6 +427,8 @@ func (r *ServiceReconciler) deleteFirewallRule(ctx context.Context, svc *corev1.
 	}
 
 	logger.Info("Deleted firewall rule", "ruleID", ruleID)
+	delete(svc.Annotations, FirewallRuleIdKey)
+	delete(svc.Annotations, FirewallRuleOperationIdKey)
 	return nil
 }
 
