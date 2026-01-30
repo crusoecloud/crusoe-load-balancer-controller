@@ -9,6 +9,7 @@ import (
 	utils "lb_controller/internal/utils"
 	"net/http"
 	"strconv"
+	"strings"
 
 	crusoeapi "github.com/crusoecloud/client-go/swagger/v1alpha5"
 	swagger "github.com/crusoecloud/client-go/swagger/v1alpha5"
@@ -21,29 +22,30 @@ import (
 type opStatus string
 
 const (
-	AnnotationHealthCheckFailureCount              = "crusoe.ai/health-check-failure-count"
-	AnnotationHealthCheckInterval                  = "crusoe.ai/health-check-interval"
-	AnnotationHealthCheckSuccessCount              = "crusoe.ai/health-check-success-count"
-	AnnotationHealthCheckTimeout                   = "crusoe.ai/health-check-timeout"
-	projectIDEnvKey                                = "CRUSOE_PROJECT_ID"
-	projectIDLabelKey                              = "crusoe.ai/project.id"
-	instanceIDEnvKey                               = "CRUSOE_INSTANCE_ID"
-	instanceIDLabelKey                             = "crusoe.ai/instance.id"
-	loadbalancerIDLabelKey                         = "crusoe.ai/load-balancer-id"
-	CreateFirewallRuleAnnotationKey                = "crusoe.ai/create-firewall-rule"
-	CreateFirewallRuleAnnotationSources            = "crusoe.ai/create-firewall-rule-sources"
-	CreateFirewallRuleAnnotationProtocols          = "crusoe.ai/create-firewall-rule-protocols"
-	FirewallRuleOperationIdKey                     = "crusoe.ai/firewall-rule-operation-id"
-	FirewallRuleIdKey                              = "crusoe.ai/firewall-rule-id"
-	vmIDFilePath                                   = "/sys/class/dmi/id/product_uuid"
-	NodeNameFlag                                   = "node-name"
-	OpSuccess                             opStatus = "SUCCEEDED"
-	CrusoeAPIEndpointFlag                          = "crusoe-api-endpoint"
-	CrusoeAccessKeyFlag                            = "crusoe-elb-access-key"
-	CrusoeSecretKeyFlag                            = "crusoe-elb-secret-key" //nolint:gosec // false positive, this is a flag name
-	CrusoeProjectIDFlag                            = "crusoe-project-id"
-	CrusoeVPCIDFlag                                = "crusoe-vpc-id"
-	CrusoeSubnetIDFlag                             = "crusoe-subnet-id"
+	AnnotationHealthCheckFailureCount                     = "crusoe.ai/health-check-failure-count"
+	AnnotationHealthCheckInterval                         = "crusoe.ai/health-check-interval"
+	AnnotationHealthCheckSuccessCount                     = "crusoe.ai/health-check-success-count"
+	AnnotationHealthCheckTimeout                          = "crusoe.ai/health-check-timeout"
+	projectIDEnvKey                                       = "CRUSOE_PROJECT_ID"
+	projectIDLabelKey                                     = "crusoe.ai/project.id"
+	instanceIDEnvKey                                      = "CRUSOE_INSTANCE_ID"
+	instanceIDLabelKey                                    = "crusoe.ai/instance.id"
+	loadbalancerIDLabelKey                                = "crusoe.ai/load-balancer-id"
+	CreateFirewallRuleAnnotationKey                       = "crusoe.ai/create-firewall-rule"
+	CreateFirewallRuleAnnotationSources                   = "crusoe.ai/create-firewall-rule-sources"
+	CreateFirewallRuleAnnotationProtocols                 = "crusoe.ai/create-firewall-rule-protocols"
+	CreateFirewallRuleAnnotationDestinationPorts          = "crusoe.ai/create-firewall-rule-destination-ports"
+	FirewallRuleOperationIdKey                            = "crusoe.ai/firewall-rule-operation-id"
+	FirewallRuleIdKey                                     = "crusoe.ai/firewall-rule-id"
+	vmIDFilePath                                          = "/sys/class/dmi/id/product_uuid"
+	NodeNameFlag                                          = "node-name"
+	OpSuccess                                    opStatus = "SUCCEEDED"
+	CrusoeAPIEndpointFlag                                 = "crusoe-api-endpoint"
+	CrusoeAccessKeyFlag                                   = "crusoe-elb-access-key"
+	CrusoeSecretKeyFlag                                   = "crusoe-elb-secret-key" //nolint:gosec // false positive, this is a flag name
+	CrusoeProjectIDFlag                                   = "crusoe-project-id"
+	CrusoeVPCIDFlag                                       = "crusoe-vpc-id"
+	CrusoeSubnetIDFlag                                    = "crusoe-subnet-id"
 )
 
 var (
@@ -354,16 +356,20 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 		protocols = []string{protocol}
 	}
 
-	listenPortsAndBackends := r.parseListenPortsAndBackends(ctx, svc, logger)
 	var destinationPorts []string
-	for _, portAndBackend := range listenPortsAndBackends {
-		for _, backend := range portAndBackend.Backends {
-			destinationPorts = append(destinationPorts, fmt.Sprintf("%d", backend.Port))
+	if destinationPortsStr, exists := svc.Annotations[CreateFirewallRuleAnnotationDestinationPorts]; exists {
+		destinationPorts = strings.Split(destinationPortsStr, ",")
+	} else {
+		listenPortsAndBackends := r.parseListenPortsAndBackends(ctx, svc, logger)
+		for _, portAndBackend := range listenPortsAndBackends {
+			for _, backend := range portAndBackend.Backends {
+				destinationPorts = append(destinationPorts, fmt.Sprintf("%d", backend.Port))
+			}
 		}
-	}
-	if len(destinationPorts) == 0 {
-		logger.Info("No backends found, skipping firewall rule creation", "service", svc.Name)
-		return nil
+		if len(destinationPorts) == 0 {
+			logger.Info("No backends found, skipping firewall rule creation", "service", svc.Name)
+			return nil
+		}
 	}
 
 	logger.Info("Creating VPC firewall rule", "name", ruleName, "vpcNetworkId", vpcID, "destinationPorts", destinationPorts, "protocols", protocols)
