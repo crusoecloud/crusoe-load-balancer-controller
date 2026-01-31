@@ -38,9 +38,7 @@ kind: Service
 metadata:
   name: my-service
   annotations:
-    crusoe.ai/create-firewall-rule: "true" # Enabled only if true
-    crusoe.ai/create-firewall-rule-sources: "0.0.0.0/0" # Comma-separated list of CIDR blocks
-    crusoe.ai/create-firewall-rule-protocols: "TCP,UDP" # Comma-separated list of protocols
+    crusoe.ai/manage-firewall-rule: "true" # Enabled only if true
 spec:
   type: LoadBalancer
   ports:
@@ -48,6 +46,8 @@ spec:
       targetPort: 80
     - port: 443
       targetPort: 443
+  loadBalancerSourceRanges:
+    - 0.0.0.0/0 # Optional: defaults to 0.0.0.0/0 if not specified
 ```
 
 The controller will automatically create a firewall rule with the specified sources and protocols.  

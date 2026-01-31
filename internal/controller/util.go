@@ -8,6 +8,7 @@ import (
 	"lb_controller/internal/crusoe"
 	utils "lb_controller/internal/utils"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -22,30 +23,28 @@ import (
 type opStatus string
 
 const (
-	AnnotationHealthCheckFailureCount                     = "crusoe.ai/health-check-failure-count"
-	AnnotationHealthCheckInterval                         = "crusoe.ai/health-check-interval"
-	AnnotationHealthCheckSuccessCount                     = "crusoe.ai/health-check-success-count"
-	AnnotationHealthCheckTimeout                          = "crusoe.ai/health-check-timeout"
-	projectIDEnvKey                                       = "CRUSOE_PROJECT_ID"
-	projectIDLabelKey                                     = "crusoe.ai/project.id"
-	instanceIDEnvKey                                      = "CRUSOE_INSTANCE_ID"
-	instanceIDLabelKey                                    = "crusoe.ai/instance.id"
-	loadbalancerIDLabelKey                                = "crusoe.ai/load-balancer-id"
-	CreateFirewallRuleAnnotationKey                       = "crusoe.ai/create-firewall-rule"
-	CreateFirewallRuleAnnotationSources                   = "crusoe.ai/create-firewall-rule-sources"
-	CreateFirewallRuleAnnotationProtocols                 = "crusoe.ai/create-firewall-rule-protocols"
-	CreateFirewallRuleAnnotationDestinationPorts          = "crusoe.ai/create-firewall-rule-destination-ports"
-	FirewallRuleOperationIdKey                            = "crusoe.ai/firewall-rule-operation-id"
-	FirewallRuleIdKey                                     = "crusoe.ai/firewall-rule-id"
-	vmIDFilePath                                          = "/sys/class/dmi/id/product_uuid"
-	NodeNameFlag                                          = "node-name"
-	OpSuccess                                    opStatus = "SUCCEEDED"
-	CrusoeAPIEndpointFlag                                 = "crusoe-api-endpoint"
-	CrusoeAccessKeyFlag                                   = "crusoe-elb-access-key"
-	CrusoeSecretKeyFlag                                   = "crusoe-elb-secret-key" //nolint:gosec // false positive, this is a flag name
-	CrusoeProjectIDFlag                                   = "crusoe-project-id"
-	CrusoeVPCIDFlag                                       = "crusoe-vpc-id"
-	CrusoeSubnetIDFlag                                    = "crusoe-subnet-id"
+	AnnotationHealthCheckFailureCount          = "crusoe.ai/health-check-failure-count"
+	AnnotationHealthCheckInterval              = "crusoe.ai/health-check-interval"
+	AnnotationHealthCheckSuccessCount          = "crusoe.ai/health-check-success-count"
+	AnnotationHealthCheckTimeout               = "crusoe.ai/health-check-timeout"
+	projectIDEnvKey                            = "CRUSOE_PROJECT_ID"
+	projectIDLabelKey                          = "crusoe.ai/project.id"
+	instanceIDEnvKey                           = "CRUSOE_INSTANCE_ID"
+	instanceIDLabelKey                         = "crusoe.ai/instance.id"
+	loadbalancerIDLabelKey                     = "crusoe.ai/load-balancer-id"
+	ManageFirewallRuleKey                      = "crusoe.ai/manage-firewall-rule"
+	FirewallRuleDestinationPortsKey            = "crusoe.ai/firewall-rule-destination-ports"
+	FirewallRuleOperationIdKey                 = "crusoe.ai/firewall-rule-operation-id"
+	FirewallRuleIdKey                          = "crusoe.ai/firewall-rule-id"
+	NodeNameFlag                               = "node-name"
+	OpSuccess                         opStatus = "SUCCEEDED"
+	OpFailed                          opStatus = "FAILED"
+	CrusoeAPIEndpointFlag                      = "crusoe-api-endpoint"
+	CrusoeAccessKeyFlag                        = "crusoe-elb-access-key"
+	CrusoeSecretKeyFlag                        = "crusoe-elb-secret-key" //nolint:gosec // false positive, this is a flag name
+	CrusoeProjectIDFlag                        = "crusoe-project-id"
+	CrusoeVPCIDFlag                            = "crusoe-vpc-id"
+	CrusoeSubnetIDFlag                         = "crusoe-subnet-id"
 )
 
 var (
@@ -305,7 +304,7 @@ func getVPCAndLocationInfo(ctx context.Context, crusoeClient *crusoeapi.APIClien
 }
 
 func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.Service) error {
-	if val, exists := svc.Annotations[CreateFirewallRuleAnnotationKey]; !exists || val != "true" {
+	if val, exists := svc.Annotations[ManageFirewallRuleKey]; !exists || val != "true" {
 		return nil
 	}
 
@@ -324,13 +323,16 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 			logger.Error(err, "Failed to get firewall rule operation result")
 			return nil
 		}
-		if op != nil && op.State == "FAILED" {
+		if op != nil && op.State == string(OpFailed) {
 			logger.Info("Firewall rule operation failed, retrying")
 			delete(svc.Annotations, FirewallRuleOperationIdKey)
-		} else {
+		} else if op != nil && firewallRuleId != "" {
 			logger.Info("Firewall rule operation complete", "ruleID", firewallRuleId)
 			svc.Annotations[FirewallRuleIdKey] = firewallRuleId
 			return r.Update(ctx, svc)
+		} else {
+			logger.Info("Firewall rule operation in progress")
+			return nil
 		}
 	}
 
@@ -418,21 +420,31 @@ func (r *ServiceReconciler) GetFirewallRuleArgs(ctx context.Context, svc *corev1
 	ruleName = MakeFirewallRuleName(svc)
 
 	sources = []swagger.FirewallRuleObject{{Cidr: "0.0.0.0/0"}}
-	if source, exists := svc.Annotations[CreateFirewallRuleAnnotationSources]; exists {
-		sources = []swagger.FirewallRuleObject{{Cidr: source}}
-	}
-	protocols = []string{"TCP", "UDP"}
-	if protocol, exists := svc.Annotations[CreateFirewallRuleAnnotationProtocols]; exists {
-		protocols = []string{protocol}
+	if len(svc.Spec.LoadBalancerSourceRanges) > 0 {
+		sources = make([]swagger.FirewallRuleObject, len(svc.Spec.LoadBalancerSourceRanges))
+		for i, source := range svc.Spec.LoadBalancerSourceRanges {
+			sources[i] = swagger.FirewallRuleObject{Cidr: source}
+		}
 	}
 
-	if destinationPortsStr, exists := svc.Annotations[CreateFirewallRuleAnnotationDestinationPorts]; exists {
+	protocols = []string{}
+	for _, port := range svc.Spec.Ports {
+		if port.Protocol != "" {
+			protocols = append(protocols, string(port.Protocol))
+		} else {
+			protocols = append(protocols, "TCP")
+		}
+	}
+
+	if destinationPortsStr, exists := svc.Annotations[FirewallRuleDestinationPortsKey]; exists {
 		destinationPorts = strings.Split(destinationPortsStr, ",")
 	} else {
 		listenPortsAndBackends := r.parseListenPortsAndBackends(ctx, svc, logger)
 		for _, portAndBackend := range listenPortsAndBackends {
 			for _, backend := range portAndBackend.Backends {
-				destinationPorts = append(destinationPorts, fmt.Sprintf("%d", backend.Port))
+				if !slices.Contains(destinationPorts, fmt.Sprintf("%d", backend.Port)) {
+					destinationPorts = append(destinationPorts, fmt.Sprintf("%d", backend.Port))
+				}
 			}
 		}
 		if len(destinationPorts) == 0 {
