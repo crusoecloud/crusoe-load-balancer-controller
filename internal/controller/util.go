@@ -310,15 +310,31 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 
 	logger := log.FromContext(ctx)
 
+	projectID, vpcID, ruleName, destinationPorts, protocols, sources := r.GetFirewallRuleArgs(ctx, svc)
+
 	if _, exists := svc.Annotations[FirewallRuleIdKey]; exists {
-		rule, http_resp, err := r.CrusoeClient.VPCFirewallRulesApi.GetVPCFirewallRule(ctx, viper.GetString(CrusoeProjectIDFlag), svc.Annotations[FirewallRuleIdKey])
-		if http_resp.StatusCode == 404 || rule.Id == "" {
+		rule, httpResp, err := r.CrusoeClient.VPCFirewallRulesApi.GetVPCFirewallRule(ctx, viper.GetString(CrusoeProjectIDFlag), svc.Annotations[FirewallRuleIdKey])
+		if (httpResp != nil && httpResp.StatusCode == 404) || rule.Id == "" {
 			logger.Info("Firewall rule not found, recreating")
 			delete(svc.Annotations, FirewallRuleIdKey)
 			delete(svc.Annotations, FirewallRuleOperationIdKey)
 		} else if err != nil {
 			logger.Error(err, "Failed to get firewall rule")
-			return nil
+			return err
+		} else {
+			if rule.Name != ruleName || !slices.Equal(rule.DestinationPorts, destinationPorts) || !slices.Equal(rule.Protocols, protocols) || !slices.Equal(rule.Sources, sources) {
+				logger.Info("Firewall rule does not match service, patching")
+				_, _, err = r.CrusoeClient.VPCFirewallRulesApi.PatchVPCFirewallRule(ctx, swagger.VpcFirewallRulesPatchRequest{
+					Name:             ruleName,
+					DestinationPorts: destinationPorts,
+					Protocols:        protocols,
+					Sources:          sources,
+				}, projectID, svc.Annotations[FirewallRuleIdKey])
+				if err != nil {
+					logger.Error(err, "Failed to patch firewall rule")
+					return err
+				}
+			}
 		}
 	} else if operationID, exists := svc.Annotations[FirewallRuleOperationIdKey]; exists {
 		logger.Info("Firewall rule operation exists, checking status")
@@ -326,7 +342,7 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 		op, firewallRule, err := GetFirewallRuleOperationResult(ctx, r.CrusoeClient, operationID)
 		if err != nil {
 			logger.Error(err, "Failed to get firewall rule operation result")
-			return nil
+			return err
 		}
 		if op != nil && op.State == string(OpFailed) {
 			logger.Info("Firewall rule operation failed, retrying")
@@ -340,8 +356,6 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 			return nil
 		}
 	}
-
-	projectID, vpcID, ruleName, destinationPorts, protocols, sources := r.GetFirewallRuleArgs(ctx, svc)
 
 	logger.Info("Creating firewall rule", "name", ruleName, "vpcNetworkId", vpcID, "destinationPorts", destinationPorts, "protocols", protocols)
 	op_resp, _, err := r.CrusoeClient.VPCFirewallRulesApi.CreateVPCFirewallRule(ctx,
@@ -359,9 +373,8 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 		}, projectID)
 	if err != nil {
 		logger.Error(err, "Failed to create firewall rule", "name", ruleName)
-		return nil
+		return err
 	}
-	// TODO about retryable - should I populate firewall key if failure??
 
 	svc.Annotations[FirewallRuleOperationIdKey] = op_resp.Operation.OperationId
 
@@ -370,6 +383,10 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 }
 
 func (r *ServiceReconciler) deleteFirewallRule(ctx context.Context, svc *corev1.Service) error {
+	if val, exists := svc.Annotations[ManageFirewallRuleKey]; !exists || val != "true" {
+		return nil
+	}
+
 	logger := log.FromContext(ctx)
 
 	projectId := viper.GetString(CrusoeProjectIDFlag)
@@ -404,6 +421,8 @@ func (r *ServiceReconciler) deleteFirewallRule(ctx context.Context, svc *corev1.
 		return err
 	}
 
+	delete(svc.Annotations, FirewallRuleIdKey)
+	delete(svc.Annotations, FirewallRuleOperationIdKey)
 	logger.Info("Deleted firewall rule", "ruleID", ruleID)
 	return r.Update(ctx, svc)
 }
@@ -436,7 +455,9 @@ func (r *ServiceReconciler) GetFirewallRuleArgs(ctx context.Context, svc *corev1
 	protocols = []string{}
 	for _, port := range svc.Spec.Ports {
 		if port.Protocol != "" {
-			protocols = append(protocols, string(port.Protocol))
+			if !slices.Contains(protocols, string(port.Protocol)) {
+				protocols = append(protocols, string(port.Protocol))
+			}
 		} else {
 			protocols = append(protocols, "TCP")
 		}
