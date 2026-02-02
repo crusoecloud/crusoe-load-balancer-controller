@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
-	"strings"
 
 	crusoeapi "github.com/crusoecloud/client-go/swagger/v1alpha5"
 	swagger "github.com/crusoecloud/client-go/swagger/v1alpha5"
@@ -33,7 +32,6 @@ const (
 	instanceIDLabelKey                         = "crusoe.ai/instance.id"
 	loadbalancerIDLabelKey                     = "crusoe.ai/load-balancer-id"
 	ManageFirewallRuleKey                      = "crusoe.ai/manage-firewall-rule"
-	FirewallRuleDestinationPortsKey            = "crusoe.ai/firewall-rule-destination-ports"
 	FirewallRuleOperationIdKey                 = "crusoe.ai/firewall-rule-operation-id"
 	FirewallRuleIdKey                          = "crusoe.ai/firewall-rule-id"
 	NodeNameFlag                               = "node-name"
@@ -456,21 +454,17 @@ func (r *ServiceReconciler) GetFirewallRuleArgs(ctx context.Context, svc *corev1
 		}
 	}
 
-	if destinationPortsStr, exists := svc.Annotations[FirewallRuleDestinationPortsKey]; exists {
-		destinationPorts = strings.Split(destinationPortsStr, ",")
-	} else {
-		listenPortsAndBackends := r.parseListenPortsAndBackends(ctx, svc, logger)
-		for _, portAndBackend := range listenPortsAndBackends {
-			for _, backend := range portAndBackend.Backends {
-				if !slices.Contains(destinationPorts, fmt.Sprintf("%d", backend.Port)) {
-					destinationPorts = append(destinationPorts, fmt.Sprintf("%d", backend.Port))
-				}
+	listenPortsAndBackends := r.parseListenPortsAndBackends(ctx, svc, logger)
+	for _, portAndBackend := range listenPortsAndBackends {
+		for _, backend := range portAndBackend.Backends {
+			if !slices.Contains(destinationPorts, fmt.Sprintf("%d", backend.Port)) {
+				destinationPorts = append(destinationPorts, fmt.Sprintf("%d", backend.Port))
 			}
 		}
-		if len(destinationPorts) == 0 {
-			logger.Info("No backends found, skipping firewall rule creation")
-			return "", "", "", nil, nil, nil
-		}
+	}
+	if len(destinationPorts) == 0 {
+		logger.Info("No backends found, skipping firewall rule creation")
+		return "", "", "", nil, nil, nil
 	}
 
 	return projectID, vpcID, ruleName, destinationPorts, protocols, sources
