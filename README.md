@@ -44,8 +44,6 @@ spec:
   ports:
     - port: 80
       targetPort: 80
-    - port: 443
-      targetPort: 443
   loadBalancerSourceRanges:
     - 0.0.0.0/0 # Optional: defaults to 0.0.0.0/0 if not specified
 ```

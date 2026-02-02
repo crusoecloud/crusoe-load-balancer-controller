@@ -311,14 +311,19 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 	logger := log.FromContext(ctx)
 
 	if _, exists := svc.Annotations[FirewallRuleIdKey]; exists {
-		logger.Info("Firewall rule ID already exists, skipping creation")
-		return nil
-	}
-	if operationID, exists := svc.Annotations[FirewallRuleOperationIdKey]; exists {
+		rule, http_resp, err := r.CrusoeClient.VPCFirewallRulesApi.GetVPCFirewallRule(ctx, viper.GetString(CrusoeProjectIDFlag), svc.Annotations[FirewallRuleIdKey])
+		if http_resp.StatusCode == 404 || rule.Id == "" {
+			logger.Info("Firewall rule not found, recreating")
+			delete(svc.Annotations, FirewallRuleIdKey)
+			delete(svc.Annotations, FirewallRuleOperationIdKey)
+		} else if err != nil {
+			logger.Error(err, "Failed to get firewall rule")
+			return nil
+		}
+	} else if operationID, exists := svc.Annotations[FirewallRuleOperationIdKey]; exists {
 		logger.Info("Firewall rule operation exists, checking status")
 
-		// check if operation is complete
-		op, firewallRuleId, err := GetFirewallRuleOperationResult(ctx, r.CrusoeClient, operationID)
+		op, firewallRule, err := GetFirewallRuleOperationResult(ctx, r.CrusoeClient, operationID)
 		if err != nil {
 			logger.Error(err, "Failed to get firewall rule operation result")
 			return nil
@@ -326,9 +331,9 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 		if op != nil && op.State == string(OpFailed) {
 			logger.Info("Firewall rule operation failed, retrying")
 			delete(svc.Annotations, FirewallRuleOperationIdKey)
-		} else if op != nil && firewallRuleId != "" {
-			logger.Info("Firewall rule operation complete", "ruleID", firewallRuleId)
-			svc.Annotations[FirewallRuleIdKey] = firewallRuleId
+		} else if firewallRule != nil {
+			logger.Info("Firewall rule operation complete", "ruleName", firewallRule.Name)
+			svc.Annotations[FirewallRuleIdKey] = firewallRule.Id
 			return r.Update(ctx, svc)
 		} else {
 			logger.Info("Firewall rule operation in progress")
@@ -338,7 +343,7 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 
 	projectID, vpcID, ruleName, destinationPorts, protocols, sources := r.GetFirewallRuleArgs(ctx, svc)
 
-	logger.Info("Creating VPC firewall rule", "name", ruleName, "vpcNetworkId", vpcID, "destinationPorts", destinationPorts, "protocols", protocols)
+	logger.Info("Creating firewall rule", "name", ruleName, "vpcNetworkId", vpcID, "destinationPorts", destinationPorts, "protocols", protocols)
 	op_resp, _, err := r.CrusoeClient.VPCFirewallRulesApi.CreateVPCFirewallRule(ctx,
 		swagger.VpcFirewallRulesPostRequestV1Alpha5{
 			Name:   ruleName,
@@ -356,6 +361,7 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 		logger.Error(err, "Failed to create firewall rule", "name", ruleName)
 		return nil
 	}
+	// TODO about retryable - should I populate firewall key if failure??
 
 	svc.Annotations[FirewallRuleOperationIdKey] = op_resp.Operation.OperationId
 
@@ -377,12 +383,12 @@ func (r *ServiceReconciler) deleteFirewallRule(ctx context.Context, svc *corev1.
 			logger.Info("Firewall rule operation ID not found, skipping deletion", "service", svc.Name)
 			return nil
 		} else {
-			_, firewallRuleId, err := GetFirewallRuleOperationResult(ctx, r.CrusoeClient, operationID)
-			if err != nil || firewallRuleId == "" {
+			_, firewallRule, err := GetFirewallRuleOperationResult(ctx, r.CrusoeClient, operationID)
+			if err != nil || firewallRule == nil {
 				logger.Error(err, "Firewall rule not found or operation failed")
 				return nil
 			}
-			ruleID = firewallRuleId
+			ruleID = firewallRule.Id
 		}
 	} else {
 		ruleID = existingRuleID
@@ -463,21 +469,21 @@ func MakeFirewallRuleName(svc *corev1.Service) string {
 }
 
 func GetFirewallRuleOperationResult(ctx context.Context, crusoeClient *crusoeapi.APIClient, operationID string) (
-	*swagger.Operation, string, error,
+	*swagger.Operation, *swagger.VpcFirewallRule, error,
 ) {
 	op, httpResp, err := crusoeClient.VPCFirewallRuleOperationsApi.GetNetworkingVPCFirewallRulesOperation(
 		ctx, viper.GetString(utils.CrusoeProjectIDFlag), operationID,
 	)
 	if err != nil {
-		return nil, "", err
+		return nil, nil, err
 	}
 	if httpResp.StatusCode != http.StatusOK {
-		return nil, "", fmt.Errorf("failed to get firewall rule operation: %v", httpResp)
+		return nil, nil, fmt.Errorf("failed to get firewall rule operation: %s", httpResp.Status)
 	}
 
 	firewallRule, err := OpResultToItem[swagger.VpcFirewallRule](op.Result)
 	if err != nil {
-		return nil, "", err
+		return nil, nil, err
 	}
-	return &op, firewallRule.Id, nil
+	return &op, firewallRule, nil
 }
