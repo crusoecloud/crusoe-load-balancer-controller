@@ -448,7 +448,7 @@ func (r *ServiceReconciler) GetFirewallRuleArgs(ctx context.Context, svc *corev1
 	protocols = []string{}
 	for _, port := range svc.Spec.Ports {
 		if port.Protocol != "" {
-			if !slices.Contains(protocols, string(port.Protocol)) {
+			if !slices.Contains(protocols, string(port.Protocol)) && string(port.Protocol) != "" {
 				protocols = append(protocols, string(port.Protocol))
 			}
 		} else {
@@ -479,6 +479,9 @@ func (r *ServiceReconciler) GetFirewallRuleArgs(ctx context.Context, svc *corev1
 func MakeFirewallRuleName(svc *corev1.Service) string {
 	// TODO: Use GenerateLoadBalancerName once merged in
 	clusterID := viper.GetString(utils.CrusoeClusterIDFlag)
+	if len(clusterID) < 5 {
+		return fmt.Sprintf("%s-%s-%s", svc.Name, svc.Namespace, clusterID)
+	}
 	return fmt.Sprintf("%s-%s-%s", svc.Name, svc.Namespace, clusterID[len(clusterID)-5:])
 }
 
