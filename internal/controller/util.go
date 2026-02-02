@@ -311,6 +311,10 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 	logger := log.FromContext(ctx)
 
 	projectID, vpcID, ruleName, destinationPorts, protocols, sources := r.GetFirewallRuleArgs(ctx, svc)
+	if projectID == "" || vpcID == "" || ruleName == "" || destinationPorts == nil || protocols == nil || sources == nil {
+		// skipping firewall rule creation based on args
+		return nil
+	}
 
 	if _, exists := svc.Annotations[FirewallRuleIdKey]; exists {
 		rule, httpResp, err := r.CrusoeClient.VPCFirewallRulesApi.GetVPCFirewallRule(ctx, viper.GetString(CrusoeProjectIDFlag), svc.Annotations[FirewallRuleIdKey])
@@ -322,19 +326,8 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 			logger.Error(err, "Failed to get firewall rule")
 			return err
 		} else {
-			if rule.Name != ruleName || !slices.Equal(rule.DestinationPorts, destinationPorts) || !slices.Equal(rule.Protocols, protocols) || !slices.Equal(rule.Sources, sources) {
-				logger.Info("Firewall rule does not match service, patching")
-				_, _, err = r.CrusoeClient.VPCFirewallRulesApi.PatchVPCFirewallRule(ctx, swagger.VpcFirewallRulesPatchRequest{
-					Name:             ruleName,
-					DestinationPorts: destinationPorts,
-					Protocols:        protocols,
-					Sources:          sources,
-				}, projectID, svc.Annotations[FirewallRuleIdKey])
-				if err != nil {
-					logger.Error(err, "Failed to patch firewall rule")
-					return err
-				}
-			}
+			// TODO: patch firewall rule if it doesn't match service
+			return nil
 		}
 	} else if operationID, exists := svc.Annotations[FirewallRuleOperationIdKey]; exists {
 		logger.Info("Firewall rule operation exists, checking status")
@@ -475,7 +468,7 @@ func (r *ServiceReconciler) GetFirewallRuleArgs(ctx context.Context, svc *corev1
 			}
 		}
 		if len(destinationPorts) == 0 {
-			logger.Info("No backends found, skipping firewall rule creation", "service", svc.Name)
+			logger.Info("No backends found, skipping firewall rule creation")
 			return "", "", "", nil, nil, nil
 		}
 	}
