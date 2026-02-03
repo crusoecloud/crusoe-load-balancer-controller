@@ -162,6 +162,7 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 		ListenPortsAndBackends: listenPortsAndBackends,
 		HealthCheckOptions:     healthCheckOptions,
 	}
+	logger.Info("Creating load balancer", "payload", apiPayload)
 
 	op_resp, http_resp, err := r.CrusoeClient.ExternalLoadBalancersApi.CreateExternalLoadBalancer(ctx, apiPayload, projectId)
 	if err != nil {
@@ -222,6 +223,13 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 	}
 
 	logger.Info("Stored Load Balancer ID in Service annotations", "service", svc.Name, "loadBalancerID", loadBalancer.Id)
+
+	// Ensure firewall rule has been created if necessary
+	// TODO: Requeue if firewall rule creation fails
+	if err := r.ensureFirewallRule(ctx, svc); err != nil {
+		logger.Error(err, "Failed to ensure firewall rule")
+	}
+
 	return ctrl.Result{}, nil
 }
 
@@ -230,6 +238,10 @@ func (r *ServiceReconciler) handleDelete(ctx context.Context, svc *corev1.Servic
 	logger := log.FromContext(ctx)
 
 	loadBalancerID := svc.Annotations[loadbalancerIDLabelKey]
+
+	if err := r.deleteFirewallRule(ctx, svc); err != nil {
+		logger.Error(err, "Failed to delete firewall rule")
+	}
 
 	// Call the API to delete the load balancer
 	projectId := viper.GetString(CrusoeProjectIDFlag)
@@ -279,6 +291,11 @@ func (r *ServiceReconciler) handleUpdate(ctx context.Context, svc *corev1.Servic
 	if err := r.updateLoadBalancer(ctx, svc, logger); err != nil {
 		// Could choose to requeue on errors
 		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
+
+	// Ensure firewall rule has been created if necessary
+	if err := r.ensureFirewallRule(ctx, svc); err != nil {
+		logger.Error(err, "Failed to ensure firewall rule")
 	}
 
 	logger.Info("Successfully handled update for ELB", "service", svc.Name)

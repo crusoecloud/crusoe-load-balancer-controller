@@ -7,13 +7,18 @@ import (
 	"fmt"
 	"lb_controller/internal/crusoe"
 	utils "lb_controller/internal/utils"
+	"net/http"
+	"slices"
+	"sort"
 	"strconv"
+	"strings"
 
 	crusoeapi "github.com/crusoecloud/client-go/swagger/v1alpha5"
 	swagger "github.com/crusoecloud/client-go/swagger/v1alpha5"
 	"github.com/go-logr/logr"
 	"github.com/ory/viper"
 	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -29,9 +34,12 @@ const (
 	instanceIDEnvKey                           = "CRUSOE_INSTANCE_ID"
 	instanceIDLabelKey                         = "crusoe.ai/instance.id"
 	loadbalancerIDLabelKey                     = "crusoe.ai/load-balancer-id"
-	vmIDFilePath                               = "/sys/class/dmi/id/product_uuid"
+	ManageFirewallRuleKey                      = "crusoe.ai/manage-firewall-rule"
+	FirewallRuleOperationIdKey                 = "crusoe.ai/firewall-rule-operation-id"
+	FirewallRuleIdKey                          = "crusoe.ai/firewall-rule-id"
 	NodeNameFlag                               = "node-name"
 	OpSuccess                         opStatus = "SUCCEEDED"
+	OpFailed                          opStatus = "FAILED"
 	CrusoeAPIEndpointFlag                      = "crusoe-api-endpoint"
 	CrusoeAccessKeyFlag                        = "crusoe-elb-access-key"
 	CrusoeSecretKeyFlag                        = "crusoe-elb-secret-key" //nolint:gosec // false positive, this is a flag name
@@ -43,6 +51,15 @@ const (
 var (
 	errUnableToGetOpRes = errors.New("failed to get result of operation")
 )
+
+type firewallRuleArgs struct {
+	projectID        string
+	vpcID            string
+	ruleName         string
+	destinationPorts []string
+	protocols        []string
+	sources          []swagger.FirewallRuleObject
+}
 
 // Function to parse health check options from annotations
 func ParseHealthCheckOptionsFromAnnotations(annotations map[string]string) *crusoeapi.HealthCheckOptionsExternalLb {
@@ -294,4 +311,288 @@ func getVPCAndLocationInfo(ctx context.Context, crusoeClient *crusoeapi.APIClien
 	location = subnet.Location
 
 	return vpcID, location, err
+}
+
+func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.Service) error {
+	if svc.Annotations == nil {
+		svc.Annotations = make(map[string]string)
+	}
+
+	if val, exists := svc.Annotations[ManageFirewallRuleKey]; !exists || val != "true" {
+		return nil
+	}
+
+	logger := log.FromContext(ctx)
+
+	args := r.GetFirewallRuleArgs(ctx, svc)
+	if args == nil {
+		// skipping firewall rule creation based on args
+		return nil
+	}
+
+	if _, exists := svc.Annotations[FirewallRuleIdKey]; exists {
+		rule, httpResp, err := r.CrusoeClient.VPCFirewallRulesApi.GetVPCFirewallRule(ctx, args.projectID, svc.Annotations[FirewallRuleIdKey])
+		if err != nil {
+			if httpResp != nil && httpResp.StatusCode == http.StatusNotFound {
+				logger.Info("Firewall rule not found, recreating")
+				delete(svc.Annotations, FirewallRuleIdKey)
+				delete(svc.Annotations, FirewallRuleOperationIdKey)
+			} else {
+				logger.Error(err, "Failed to get firewall rule")
+				return err
+			}
+		} else {
+			matches := CompareFirewallRule(ctx, &rule, args)
+			if matches {
+				logger.Info("Firewall rule matches service, no action needed")
+				return nil
+			}
+			logger.Info("Firewall rule does not match service, patching")
+			_, _, err := r.CrusoeClient.VPCFirewallRulesApi.PatchVPCFirewallRule(ctx, swagger.VpcFirewallRulesPatchRequest{
+				Name: args.ruleName,
+				Destinations: []swagger.FirewallRuleObject{
+					{ResourceId: args.vpcID},
+				},
+				DestinationPorts: args.destinationPorts,
+				Protocols:        args.protocols,
+				Sources:          args.sources,
+			}, args.projectID, svc.Annotations[FirewallRuleIdKey])
+
+			if err != nil {
+				logger.Error(err, "Failed to patch firewall rule")
+				return err
+			}
+
+			return nil
+		}
+	} else if operationID, exists := svc.Annotations[FirewallRuleOperationIdKey]; exists {
+		logger.Info("Firewall rule operation exists, checking status")
+
+		op, firewallRule, err := GetFirewallRuleOperationResult(ctx, r.CrusoeClient, operationID)
+		if err != nil {
+			logger.Error(err, "Failed to get firewall rule operation result")
+
+			return err
+		}
+		if op != nil && op.State == string(OpFailed) {
+			logger.Info("Firewall rule operation failed, retrying", "result", op.Result)
+			delete(svc.Annotations, FirewallRuleOperationIdKey)
+		} else if firewallRule != nil {
+			logger.Info("Firewall rule operation complete", "ruleName", firewallRule.Name)
+			svcCopy := svc.DeepCopy()
+			svc.Annotations[FirewallRuleIdKey] = firewallRule.Id
+
+			return r.Patch(ctx, svc, client.MergeFrom(svcCopy))
+		} else {
+			logger.Info("Firewall rule operation in progress")
+
+			return nil
+		}
+	}
+
+	logger.Info("Creating firewall rule", "name", args.ruleName, "vpcNetworkId", args.vpcID, "destinationPorts", args.destinationPorts, "protocols", args.protocols)
+	op_resp, _, err := r.CrusoeClient.VPCFirewallRulesApi.CreateVPCFirewallRule(ctx,
+		swagger.VpcFirewallRulesPostRequestV1Alpha5{
+			Name:   args.ruleName,
+			Action: "ALLOW",
+			Destinations: []swagger.FirewallRuleObject{
+				{ResourceId: args.vpcID},
+			},
+			DestinationPorts: args.destinationPorts,
+			Protocols:        args.protocols,
+			VpcNetworkId:     args.vpcID,
+			Direction:        "INGRESS",
+			Sources:          args.sources,
+		}, args.projectID)
+	if err != nil {
+		logger.Error(err, "Failed to create firewall rule", "name", args.ruleName)
+		return err
+	}
+
+	svcCopy := svc.DeepCopy()
+	svc.Annotations[FirewallRuleOperationIdKey] = op_resp.Operation.OperationId
+	logger.Info("Created firewall rule", "name", args.ruleName, "operationId", op_resp.Operation.OperationId)
+	return r.Patch(ctx, svc, client.MergeFrom(svcCopy))
+}
+
+func (r *ServiceReconciler) deleteFirewallRule(ctx context.Context, svc *corev1.Service) error {
+	if svc.Annotations == nil {
+		svc.Annotations = make(map[string]string)
+	}
+
+	if val, exists := svc.Annotations[ManageFirewallRuleKey]; !exists || val != "true" {
+		return nil
+	}
+
+	logger := log.FromContext(ctx)
+
+	projectId := viper.GetString(CrusoeProjectIDFlag)
+	if projectId == "" {
+		return fmt.Errorf("project ID is required")
+	}
+
+	var ruleID string
+	if existingRuleID, exists := svc.Annotations[FirewallRuleIdKey]; !exists || existingRuleID == "" {
+		if operationID, exists := svc.Annotations[FirewallRuleOperationIdKey]; !exists {
+			logger.Info("Firewall rule operation ID not found, skipping deletion", "service", svc.Name)
+			return nil
+		} else {
+			_, firewallRule, err := GetFirewallRuleOperationResult(ctx, r.CrusoeClient, operationID)
+			if err != nil || firewallRule == nil {
+				logger.Error(err, "Firewall rule not found or operation failed")
+				return nil
+			}
+			ruleID = firewallRule.Id
+		}
+	} else {
+		ruleID = existingRuleID
+	}
+
+	_, httpResp, err := r.CrusoeClient.VPCFirewallRulesApi.DeleteVPCFirewallRule(ctx, projectId, ruleID)
+	if err != nil {
+		if httpResp != nil && httpResp.StatusCode == http.StatusNotFound {
+			logger.Info("Firewall rule not found (404), assuming already deleted", "ruleID", ruleID)
+
+			svcCopy := svc.DeepCopy()
+			delete(svc.Annotations, FirewallRuleIdKey)
+			delete(svc.Annotations, FirewallRuleOperationIdKey)
+			return r.Patch(ctx, svc, client.MergeFrom(svcCopy))
+		}
+		logger.Error(err, "Failed to delete firewall rule", "ruleID", ruleID)
+		return err
+	}
+
+	logger.Info("Deleted firewall rule", "ruleID", ruleID)
+
+	svcCopy := svc.DeepCopy()
+	delete(svc.Annotations, FirewallRuleIdKey)
+	delete(svc.Annotations, FirewallRuleOperationIdKey)
+	return r.Patch(ctx, svc, client.MergeFrom(svcCopy))
+}
+
+func (r *ServiceReconciler) GetFirewallRuleArgs(ctx context.Context, svc *corev1.Service) *firewallRuleArgs {
+	logger := log.FromContext(ctx)
+	projectID := viper.GetString(CrusoeProjectIDFlag)
+	if projectID == "" {
+		logger.Info("CRUSOE_PROJECT_ID not set, skipping firewall rule creation")
+		return nil
+	}
+
+	vpcID, _, err := getVPCAndLocationInfo(ctx, r.CrusoeClient, logger)
+	if err != nil {
+		logger.Error(err, "Failed to get VPC info, skipping firewall rule creation")
+		return nil
+	}
+
+	ruleName := MakeFirewallRuleName(svc)
+
+	sources := []swagger.FirewallRuleObject{{Cidr: "0.0.0.0/0"}}
+	if len(svc.Spec.LoadBalancerSourceRanges) > 0 {
+		sources = make([]swagger.FirewallRuleObject, len(svc.Spec.LoadBalancerSourceRanges))
+		for i, source := range svc.Spec.LoadBalancerSourceRanges {
+			sources[i] = swagger.FirewallRuleObject{Cidr: source}
+		}
+	}
+
+	protocols := []string{}
+	for _, port := range svc.Spec.Ports {
+		if port.Protocol != "" {
+			if !slices.Contains(protocols, strings.ToLower(string(port.Protocol))) && string(port.Protocol) != "" {
+				protocols = append(protocols, strings.ToLower(string(port.Protocol)))
+			}
+		} else if !slices.Contains(protocols, "tcp") {
+			protocols = append(protocols, "tcp")
+		}
+	}
+
+	destinationPorts := []string{}
+	listenPortsAndBackends := r.parseListenPortsAndBackends(ctx, svc, logger)
+	for _, portAndBackend := range listenPortsAndBackends {
+		for _, backend := range portAndBackend.Backends {
+			if !slices.Contains(destinationPorts, fmt.Sprintf("%d", backend.Port)) {
+				destinationPorts = append(destinationPorts, fmt.Sprintf("%d", backend.Port))
+			}
+		}
+	}
+	if len(destinationPorts) == 0 {
+		// TODO: add to service
+		logger.Info("No backends found, skipping firewall rule creation")
+		return nil
+	}
+
+	return &firewallRuleArgs{
+		projectID:        projectID,
+		vpcID:            vpcID,
+		ruleName:         ruleName,
+		destinationPorts: destinationPorts,
+		protocols:        protocols,
+		sources:          sources,
+	}
+}
+
+func MakeFirewallRuleName(svc *corev1.Service) (name string) {
+	// TODO: Use GenerateLoadBalancerName once merged in
+	clusterID := viper.GetString(utils.CrusoeClusterIDFlag)
+
+	if len(fmt.Sprintf("%s-%s-%s", svc.Name, svc.Namespace, clusterID[len(clusterID)-5:])) > 60 {
+		name = fmt.Sprintf("%s-%s-%s", svc.Name, svc.Namespace, clusterID[len(clusterID)-5:])[:60]
+	} else {
+		name = fmt.Sprintf("%s-%s-%s", svc.Name, svc.Namespace, clusterID[len(clusterID)-5:])
+	}
+
+	return name
+}
+
+func CompareFirewallRule(ctx context.Context, rule *swagger.VpcFirewallRule, args *firewallRuleArgs) bool {
+	logger := log.FromContext(ctx)
+	sort.Strings(rule.DestinationPorts)
+	sort.Strings(args.destinationPorts)
+	sort.Slice(rule.Sources, func(i, j int) bool {
+		return rule.Sources[i].Cidr < rule.Sources[j].Cidr
+	})
+	sort.Slice(args.sources, func(i, j int) bool {
+		return args.sources[i].Cidr < args.sources[j].Cidr
+	})
+	sort.Strings(rule.Protocols)
+	sort.Strings(args.protocols)
+
+	if rule.Name != args.ruleName {
+		logger.Info("Rule name does not match", "ruleName", rule.Name, "argsRuleName", args.ruleName)
+	}
+	if !slices.Equal(rule.Protocols, args.protocols) {
+		logger.Info("Rule protocols do not match", "ruleProtocols", rule.Protocols, "argsProtocols", args.protocols)
+	}
+	if rule.VpcNetworkId != args.vpcID {
+		logger.Info("Rule VPC networks do not match", "ruleVPC", rule.VpcNetworkId, "argsVPC", args.vpcID)
+	}
+	if !slices.Equal(rule.Sources, args.sources) {
+		logger.Info("Rule sources do not match", "ruleSources", rule.Sources, "argsSources", args.sources)
+	}
+	if !slices.Equal(rule.DestinationPorts, args.destinationPorts) {
+		logger.Info("Rule destination ports do not match", "ruleDestinationPorts", rule.DestinationPorts, "argsDestinationPorts", args.destinationPorts)
+	}
+
+	return rule.Name == args.ruleName && rule.VpcNetworkId == args.vpcID &&
+		slices.Equal(rule.DestinationPorts, args.destinationPorts) && slices.Equal(rule.Protocols, args.protocols) &&
+		slices.Equal(rule.Sources, args.sources)
+}
+
+func GetFirewallRuleOperationResult(ctx context.Context, crusoeClient *crusoeapi.APIClient, operationID string) (
+	*swagger.Operation, *swagger.VpcFirewallRule, error,
+) {
+	op, httpResp, err := crusoeClient.VPCFirewallRuleOperationsApi.GetNetworkingVPCFirewallRulesOperation(
+		ctx, viper.GetString(utils.CrusoeProjectIDFlag), operationID,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	if httpResp.StatusCode != http.StatusOK {
+		return &op, nil, fmt.Errorf("failed to get firewall rule operation: %s", httpResp.Status)
+	}
+
+	firewallRule, err := OpResultToItem[swagger.VpcFirewallRule](op.Result)
+	if err != nil {
+		return &op, nil, err
+	}
+	return &op, firewallRule, nil
 }

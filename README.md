@@ -27,3 +27,25 @@ kubectl create secret generic crusoe-secrets --from-literal=CRUSOE_ACCESS_KEY="y
 See example values.yml here: @https://github.com/crusoecloud/crusoe-load-balancer-controller-helm-charts/blob/0e57d2104cd98f93d13a773e50e78e2968c51855/charts/crusoe-lb-controller/values.yaml#L27
 
 ---
+
+## Firewall Rules
+
+To add a firewall rule to allow traffic to your load balancer based on your service's nodeports, you can use the following annotations in your Service manifest:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-service
+  annotations:
+    crusoe.ai/manage-firewall-rule: "true" # Enabled only if true
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 80
+      targetPort: 80
+  loadBalancerSourceRanges:
+    - 0.0.0.0/0 # Optional: defaults to 0.0.0.0/0 if not specified
+```
+
+The controller will automatically create a firewall rule with the specified sources and protocols.  
