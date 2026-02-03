@@ -9,7 +9,9 @@ import (
 	utils "lb_controller/internal/utils"
 	"net/http"
 	"slices"
+	"sort"
 	"strconv"
+	"strings"
 
 	crusoeapi "github.com/crusoecloud/client-go/swagger/v1alpha5"
 	swagger "github.com/crusoecloud/client-go/swagger/v1alpha5"
@@ -325,7 +327,7 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 	}
 
 	if _, exists := svc.Annotations[FirewallRuleIdKey]; exists {
-		_, httpResp, err := r.CrusoeClient.VPCFirewallRulesApi.GetVPCFirewallRule(ctx, viper.GetString(CrusoeProjectIDFlag), svc.Annotations[FirewallRuleIdKey])
+		rule, httpResp, err := r.CrusoeClient.VPCFirewallRulesApi.GetVPCFirewallRule(ctx, args.projectID, svc.Annotations[FirewallRuleIdKey])
 		if err != nil {
 			if httpResp != nil && httpResp.StatusCode == http.StatusNotFound {
 				logger.Info("Firewall rule not found, recreating")
@@ -336,7 +338,27 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 				return err
 			}
 		} else {
-			// TODO: patch firewall rule if it doesn't match service
+			matches := CompareFirewallRule(&rule, args)
+			if matches {
+				logger.Info("Firewall rule matches service, no action needed")
+				return nil
+			}
+			logger.Info("Firewall rule does not match service, patching")
+			_, _, err := r.CrusoeClient.VPCFirewallRulesApi.PatchVPCFirewallRule(ctx, swagger.VpcFirewallRulesPatchRequest{
+				Name: args.ruleName,
+				Destinations: []swagger.FirewallRuleObject{
+					{ResourceId: args.vpcID},
+				},
+				DestinationPorts: args.destinationPorts,
+				Protocols:        args.protocols,
+				Sources:          args.sources,
+			}, args.projectID, svc.Annotations[FirewallRuleIdKey])
+
+			if err != nil {
+				logger.Error(err, "Failed to patch firewall rule")
+				return err
+			}
+
 			return nil
 		}
 	} else if operationID, exists := svc.Annotations[FirewallRuleOperationIdKey]; exists {
@@ -345,6 +367,7 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 		op, firewallRule, err := GetFirewallRuleOperationResult(ctx, r.CrusoeClient, operationID)
 		if err != nil {
 			logger.Error(err, "Failed to get firewall rule operation result")
+
 			return err
 		}
 		if op != nil && op.State == string(OpFailed) {
@@ -354,9 +377,11 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 			logger.Info("Firewall rule operation complete", "ruleName", firewallRule.Name)
 			svcCopy := svc.DeepCopy()
 			svc.Annotations[FirewallRuleIdKey] = firewallRule.Id
+
 			return r.Patch(ctx, svc, client.MergeFrom(svcCopy))
 		} else {
 			logger.Info("Firewall rule operation in progress")
+
 			return nil
 		}
 	}
@@ -464,11 +489,11 @@ func (r *ServiceReconciler) GetFirewallRuleArgs(ctx context.Context, svc *corev1
 	protocols := []string{}
 	for _, port := range svc.Spec.Ports {
 		if port.Protocol != "" {
-			if !slices.Contains(protocols, string(port.Protocol)) && string(port.Protocol) != "" {
-				protocols = append(protocols, string(port.Protocol))
+			if !slices.Contains(protocols, strings.ToLower(string(port.Protocol))) && string(port.Protocol) != "" {
+				protocols = append(protocols, strings.ToLower(string(port.Protocol)))
 			}
-		} else if !slices.Contains(protocols, "TCP") {
-			protocols = append(protocols, "TCP")
+		} else if !slices.Contains(protocols, "tcp") {
+			protocols = append(protocols, "tcp")
 		}
 	}
 
@@ -508,6 +533,22 @@ func MakeFirewallRuleName(svc *corev1.Service) (name string) {
 	}
 
 	return name
+}
+
+func CompareFirewallRule(rule *swagger.VpcFirewallRule, args *firewallRuleArgs) bool {
+	sort.Strings(rule.DestinationPorts)
+	sort.Strings(args.destinationPorts)
+	sort.Slice(rule.Sources, func(i, j int) bool {
+		return rule.Sources[i].ResourceId < rule.Sources[j].ResourceId
+	})
+	sort.Slice(args.sources, func(i, j int) bool {
+		return args.sources[i].ResourceId < args.sources[j].ResourceId
+	})
+	sort.Strings(rule.Protocols)
+	sort.Strings(args.protocols)
+	return rule.Name == args.ruleName && rule.VpcNetworkId == args.vpcID &&
+		slices.Equal(rule.DestinationPorts, args.destinationPorts) && slices.Equal(rule.Protocols, args.protocols) &&
+		slices.Equal(rule.Sources, args.sources)
 }
 
 func GetFirewallRuleOperationResult(ctx context.Context, crusoeClient *crusoeapi.APIClient, operationID string) (
