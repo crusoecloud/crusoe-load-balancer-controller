@@ -317,6 +317,7 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 	if svc.Annotations == nil {
 		svc.Annotations = make(map[string]string)
 	}
+	svcCopy := svc.DeepCopy()
 
 	if val, exists := svc.Annotations[ManageFirewallRuleKey]; !exists || val != "true" {
 		return nil
@@ -379,7 +380,6 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 			delete(svc.Annotations, FirewallRuleOperationIdKey)
 		} else if firewallRule != nil {
 			logger.Info("Firewall rule operation complete", "ruleName", firewallRule.Name)
-			svcCopy := svc.DeepCopy()
 			svc.Annotations[FirewallRuleIdKey] = firewallRule.Id
 
 			return r.Patch(ctx, svc, client.MergeFrom(svcCopy))
@@ -409,7 +409,6 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 		return err
 	}
 
-	svcCopy := svc.DeepCopy()
 	svc.Annotations[FirewallRuleOperationIdKey] = op_resp.Operation.OperationId
 	logger.Info("Created firewall rule", "name", args.ruleName, "operationId", op_resp.Operation.OperationId)
 	return r.Patch(ctx, svc, client.MergeFrom(svcCopy))
