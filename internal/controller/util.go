@@ -345,7 +345,7 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 			return err
 		}
 		if op != nil && op.State == string(OpFailed) {
-			logger.Info("Firewall rule operation failed, retrying", "failureReason", op)
+			logger.Info("Firewall rule operation failed, retrying", "failureReason", op.State)
 			delete(svc.Annotations, FirewallRuleOperationIdKey)
 		} else if firewallRule != nil {
 			logger.Info("Firewall rule operation complete", "ruleName", firewallRule.Name)
