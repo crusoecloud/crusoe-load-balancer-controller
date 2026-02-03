@@ -239,7 +239,6 @@ func (r *ServiceReconciler) handleDelete(ctx context.Context, svc *corev1.Servic
 
 	loadBalancerID := svc.Annotations[loadbalancerIDLabelKey]
 
-	logger.Info("Deleting firewall rule", "service", svc.Name)
 	if err := r.deleteFirewallRule(ctx, svc); err != nil {
 		logger.Error(err, "Failed to delete firewall rule")
 	}

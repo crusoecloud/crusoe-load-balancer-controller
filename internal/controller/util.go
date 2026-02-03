@@ -16,6 +16,7 @@ import (
 	"github.com/go-logr/logr"
 	"github.com/ory/viper"
 	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -324,14 +325,16 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 	}
 
 	if _, exists := svc.Annotations[FirewallRuleIdKey]; exists {
-		rule, httpResp, err := r.CrusoeClient.VPCFirewallRulesApi.GetVPCFirewallRule(ctx, viper.GetString(CrusoeProjectIDFlag), svc.Annotations[FirewallRuleIdKey])
-		if (httpResp != nil && httpResp.StatusCode == 404) || rule.Id == "" {
-			logger.Info("Firewall rule not found, recreating")
-			delete(svc.Annotations, FirewallRuleIdKey)
-			delete(svc.Annotations, FirewallRuleOperationIdKey)
-		} else if err != nil {
-			logger.Error(err, "Failed to get firewall rule")
-			return err
+		_, httpResp, err := r.CrusoeClient.VPCFirewallRulesApi.GetVPCFirewallRule(ctx, viper.GetString(CrusoeProjectIDFlag), svc.Annotations[FirewallRuleIdKey])
+		if err != nil {
+			if httpResp != nil && httpResp.StatusCode == http.StatusNotFound {
+				logger.Info("Firewall rule not found, recreating")
+				delete(svc.Annotations, FirewallRuleIdKey)
+				delete(svc.Annotations, FirewallRuleOperationIdKey)
+			} else {
+				logger.Error(err, "Failed to get firewall rule")
+				return err
+			}
 		} else {
 			// TODO: patch firewall rule if it doesn't match service
 			return nil
@@ -345,12 +348,13 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 			return err
 		}
 		if op != nil && op.State == string(OpFailed) {
-			logger.Info("Firewall rule operation failed, retrying", "failureReason", op.State)
+			logger.Info("Firewall rule operation failed, retrying", "result", op.Result)
 			delete(svc.Annotations, FirewallRuleOperationIdKey)
 		} else if firewallRule != nil {
 			logger.Info("Firewall rule operation complete", "ruleName", firewallRule.Name)
+			svcCopy := svc.DeepCopy()
 			svc.Annotations[FirewallRuleIdKey] = firewallRule.Id
-			return r.Update(ctx, svc)
+			return r.Patch(ctx, svc, client.MergeFrom(svcCopy))
 		} else {
 			logger.Info("Firewall rule operation in progress")
 			return nil
@@ -376,10 +380,10 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 		return err
 	}
 
+	svcCopy := svc.DeepCopy()
 	svc.Annotations[FirewallRuleOperationIdKey] = op_resp.Operation.OperationId
-
 	logger.Info("Created firewall rule", "name", args.ruleName, "operationId", op_resp.Operation.OperationId)
-	return r.Update(ctx, svc)
+	return r.Patch(ctx, svc, client.MergeFrom(svcCopy))
 }
 
 func (r *ServiceReconciler) deleteFirewallRule(ctx context.Context, svc *corev1.Service) error {
@@ -415,16 +419,22 @@ func (r *ServiceReconciler) deleteFirewallRule(ctx context.Context, svc *corev1.
 	if err != nil {
 		if httpResp != nil && httpResp.StatusCode == http.StatusNotFound {
 			logger.Info("Firewall rule not found (404), assuming already deleted", "ruleID", ruleID)
-			return nil
+
+			svcCopy := svc.DeepCopy()
+			delete(svc.Annotations, FirewallRuleIdKey)
+			delete(svc.Annotations, FirewallRuleOperationIdKey)
+			return r.Patch(ctx, svc, client.MergeFrom(svcCopy))
 		}
 		logger.Error(err, "Failed to delete firewall rule", "ruleID", ruleID)
 		return err
 	}
 
+	logger.Info("Deleted firewall rule", "ruleID", ruleID)
+
+	svcCopy := svc.DeepCopy()
 	delete(svc.Annotations, FirewallRuleIdKey)
 	delete(svc.Annotations, FirewallRuleOperationIdKey)
-	logger.Info("Deleted firewall rule", "ruleID", ruleID)
-	return r.Update(ctx, svc)
+	return r.Patch(ctx, svc, client.MergeFrom(svcCopy))
 }
 
 func (r *ServiceReconciler) GetFirewallRuleArgs(ctx context.Context, svc *corev1.Service) *firewallRuleArgs {
@@ -457,7 +467,7 @@ func (r *ServiceReconciler) GetFirewallRuleArgs(ctx context.Context, svc *corev1
 			if !slices.Contains(protocols, string(port.Protocol)) && string(port.Protocol) != "" {
 				protocols = append(protocols, string(port.Protocol))
 			}
-		} else {
+		} else if !slices.Contains(protocols, "TCP") {
 			protocols = append(protocols, "TCP")
 		}
 	}
@@ -510,12 +520,12 @@ func GetFirewallRuleOperationResult(ctx context.Context, crusoeClient *crusoeapi
 		return nil, nil, err
 	}
 	if httpResp.StatusCode != http.StatusOK {
-		return nil, nil, fmt.Errorf("failed to get firewall rule operation: %s", httpResp.Status)
+		return &op, nil, fmt.Errorf("failed to get firewall rule operation: %s", httpResp.Status)
 	}
 
 	firewallRule, err := OpResultToItem[swagger.VpcFirewallRule](op.Result)
 	if err != nil {
-		return nil, nil, err
+		return &op, nil, err
 	}
 	return &op, firewallRule, nil
 }
