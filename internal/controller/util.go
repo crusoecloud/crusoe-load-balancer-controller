@@ -540,10 +540,10 @@ func CompareFirewallRule(ctx context.Context, rule *swagger.VpcFirewallRule, arg
 	sort.Strings(rule.DestinationPorts)
 	sort.Strings(args.destinationPorts)
 	sort.Slice(rule.Sources, func(i, j int) bool {
-		return rule.Sources[i].ResourceId < rule.Sources[j].ResourceId
+		return rule.Sources[i].Cidr < rule.Sources[j].Cidr
 	})
 	sort.Slice(args.sources, func(i, j int) bool {
-		return args.sources[i].ResourceId < args.sources[j].ResourceId
+		return args.sources[i].Cidr < args.sources[j].Cidr
 	})
 	sort.Strings(rule.Protocols)
 	sort.Strings(args.protocols)
