@@ -314,6 +314,10 @@ func getVPCAndLocationInfo(ctx context.Context, crusoeClient *crusoeapi.APIClien
 }
 
 func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.Service) error {
+	if svc.Annotations == nil {
+		svc.Annotations = make(map[string]string)
+	}
+
 	if val, exists := svc.Annotations[ManageFirewallRuleKey]; !exists || val != "true" {
 		return nil
 	}
@@ -412,6 +416,10 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 }
 
 func (r *ServiceReconciler) deleteFirewallRule(ctx context.Context, svc *corev1.Service) error {
+	if svc.Annotations == nil {
+		svc.Annotations = make(map[string]string)
+	}
+
 	if val, exists := svc.Annotations[ManageFirewallRuleKey]; !exists || val != "true" {
 		return nil
 	}
