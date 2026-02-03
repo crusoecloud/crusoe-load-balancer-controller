@@ -338,7 +338,7 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 				return err
 			}
 		} else {
-			matches := CompareFirewallRule(&rule, args)
+			matches := CompareFirewallRule(ctx, &rule, args)
 			if matches {
 				logger.Info("Firewall rule matches service, no action needed")
 				return nil
@@ -535,7 +535,8 @@ func MakeFirewallRuleName(svc *corev1.Service) (name string) {
 	return name
 }
 
-func CompareFirewallRule(rule *swagger.VpcFirewallRule, args *firewallRuleArgs) bool {
+func CompareFirewallRule(ctx context.Context, rule *swagger.VpcFirewallRule, args *firewallRuleArgs) bool {
+	logger := log.FromContext(ctx)
 	sort.Strings(rule.DestinationPorts)
 	sort.Strings(args.destinationPorts)
 	sort.Slice(rule.Sources, func(i, j int) bool {
@@ -546,6 +547,23 @@ func CompareFirewallRule(rule *swagger.VpcFirewallRule, args *firewallRuleArgs) 
 	})
 	sort.Strings(rule.Protocols)
 	sort.Strings(args.protocols)
+
+	if rule.Name != args.ruleName {
+		logger.Info("Rule name does not match", "ruleName", rule.Name, "argsRuleName", args.ruleName)
+	}
+	if !slices.Equal(rule.Protocols, args.protocols) {
+		logger.Info("Rule protocols do not match", "ruleProtocols", rule.Protocols, "argsProtocols", args.protocols)
+	}
+	if rule.VpcNetworkId != args.vpcID {
+		logger.Info("Rule VPC networks do not match", "ruleVPC", rule.VpcNetworkId, "argsVPC", args.vpcID)
+	}
+	if !slices.Equal(rule.Sources, args.sources) {
+		logger.Info("Rule sources do not match", "ruleSources", rule.Sources, "argsSources", args.sources)
+	}
+	if !slices.Equal(rule.DestinationPorts, args.destinationPorts) {
+		logger.Info("Rule destination ports do not match", "ruleDestinationPorts", rule.DestinationPorts, "argsDestinationPorts", args.destinationPorts)
+	}
+
 	return rule.Name == args.ruleName && rule.VpcNetworkId == args.vpcID &&
 		slices.Equal(rule.DestinationPorts, args.destinationPorts) && slices.Equal(rule.Protocols, args.protocols) &&
 		slices.Equal(rule.Sources, args.sources)
