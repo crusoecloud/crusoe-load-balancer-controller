@@ -49,6 +49,15 @@ var (
 	errUnableToGetOpRes = errors.New("failed to get result of operation")
 )
 
+type firewallRuleArgs struct {
+	projectID        string
+	vpcID            string
+	ruleName         string
+	destinationPorts []string
+	protocols        []string
+	sources          []swagger.FirewallRuleObject
+}
+
 // Function to parse health check options from annotations
 func ParseHealthCheckOptionsFromAnnotations(annotations map[string]string) *crusoeapi.HealthCheckOptionsExternalLb {
 	healthCheckOptions := &crusoeapi.HealthCheckOptionsExternalLb{}
@@ -308,8 +317,8 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 
 	logger := log.FromContext(ctx)
 
-	projectID, vpcID, ruleName, destinationPorts, protocols, sources := r.GetFirewallRuleArgs(ctx, svc)
-	if projectID == "" || vpcID == "" || ruleName == "" || destinationPorts == nil || protocols == nil || sources == nil {
+	args := r.GetFirewallRuleArgs(ctx, svc)
+	if args == nil {
 		// skipping firewall rule creation based on args
 		return nil
 	}
@@ -336,7 +345,7 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 			return err
 		}
 		if op != nil && op.State == string(OpFailed) {
-			logger.Info("Firewall rule operation failed, retrying")
+			logger.Info("Firewall rule operation failed, retrying", "failureReason", op)
 			delete(svc.Annotations, FirewallRuleOperationIdKey)
 		} else if firewallRule != nil {
 			logger.Info("Firewall rule operation complete", "ruleName", firewallRule.Name)
@@ -348,28 +357,28 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 		}
 	}
 
-	logger.Info("Creating firewall rule", "name", ruleName, "vpcNetworkId", vpcID, "destinationPorts", destinationPorts, "protocols", protocols)
+	logger.Info("Creating firewall rule", "name", args.ruleName, "vpcNetworkId", args.vpcID, "destinationPorts", args.destinationPorts, "protocols", args.protocols)
 	op_resp, _, err := r.CrusoeClient.VPCFirewallRulesApi.CreateVPCFirewallRule(ctx,
 		swagger.VpcFirewallRulesPostRequestV1Alpha5{
-			Name:   ruleName,
+			Name:   args.ruleName,
 			Action: "ALLOW",
 			Destinations: []swagger.FirewallRuleObject{
-				{ResourceId: vpcID},
+				{ResourceId: args.vpcID},
 			},
-			DestinationPorts: destinationPorts,
-			Protocols:        protocols,
-			VpcNetworkId:     vpcID,
+			DestinationPorts: args.destinationPorts,
+			Protocols:        args.protocols,
+			VpcNetworkId:     args.vpcID,
 			Direction:        "INGRESS",
-			Sources:          sources,
-		}, projectID)
+			Sources:          args.sources,
+		}, args.projectID)
 	if err != nil {
-		logger.Error(err, "Failed to create firewall rule", "name", ruleName)
+		logger.Error(err, "Failed to create firewall rule", "name", args.ruleName)
 		return err
 	}
 
 	svc.Annotations[FirewallRuleOperationIdKey] = op_resp.Operation.OperationId
 
-	logger.Info("Created firewall rule", "name", ruleName, "operationId", op_resp.Operation.OperationId)
+	logger.Info("Created firewall rule", "name", args.ruleName, "operationId", op_resp.Operation.OperationId)
 	return r.Update(ctx, svc)
 }
 
@@ -418,24 +427,23 @@ func (r *ServiceReconciler) deleteFirewallRule(ctx context.Context, svc *corev1.
 	return r.Update(ctx, svc)
 }
 
-func (r *ServiceReconciler) GetFirewallRuleArgs(ctx context.Context, svc *corev1.Service) (projectID string,
-	vpcID string, ruleName string, destinationPorts []string, protocols []string, sources []swagger.FirewallRuleObject) {
+func (r *ServiceReconciler) GetFirewallRuleArgs(ctx context.Context, svc *corev1.Service) *firewallRuleArgs {
 	logger := log.FromContext(ctx)
-	projectID = viper.GetString(CrusoeProjectIDFlag)
+	projectID := viper.GetString(CrusoeProjectIDFlag)
 	if projectID == "" {
 		logger.Info("CRUSOE_PROJECT_ID not set, skipping firewall rule creation")
-		return "", "", "", nil, nil, nil
+		return nil
 	}
 
 	vpcID, _, err := getVPCAndLocationInfo(ctx, r.CrusoeClient, logger)
 	if err != nil {
 		logger.Error(err, "Failed to get VPC info, skipping firewall rule creation")
-		return "", "", "", nil, nil, nil
+		return nil
 	}
 
-	ruleName = MakeFirewallRuleName(svc)
+	ruleName := MakeFirewallRuleName(svc)
 
-	sources = []swagger.FirewallRuleObject{{Cidr: "0.0.0.0/0"}}
+	sources := []swagger.FirewallRuleObject{{Cidr: "0.0.0.0/0"}}
 	if len(svc.Spec.LoadBalancerSourceRanges) > 0 {
 		sources = make([]swagger.FirewallRuleObject, len(svc.Spec.LoadBalancerSourceRanges))
 		for i, source := range svc.Spec.LoadBalancerSourceRanges {
@@ -443,7 +451,7 @@ func (r *ServiceReconciler) GetFirewallRuleArgs(ctx context.Context, svc *corev1
 		}
 	}
 
-	protocols = []string{}
+	protocols := []string{}
 	for _, port := range svc.Spec.Ports {
 		if port.Protocol != "" {
 			if !slices.Contains(protocols, string(port.Protocol)) && string(port.Protocol) != "" {
@@ -454,6 +462,7 @@ func (r *ServiceReconciler) GetFirewallRuleArgs(ctx context.Context, svc *corev1
 		}
 	}
 
+	destinationPorts := []string{}
 	listenPortsAndBackends := r.parseListenPortsAndBackends(ctx, svc, logger)
 	for _, portAndBackend := range listenPortsAndBackends {
 		for _, backend := range portAndBackend.Backends {
@@ -463,20 +472,32 @@ func (r *ServiceReconciler) GetFirewallRuleArgs(ctx context.Context, svc *corev1
 		}
 	}
 	if len(destinationPorts) == 0 {
+		// TODO: add to service
 		logger.Info("No backends found, skipping firewall rule creation")
-		return "", "", "", nil, nil, nil
+		return nil
 	}
 
-	return projectID, vpcID, ruleName, destinationPorts, protocols, sources
+	return &firewallRuleArgs{
+		projectID:        projectID,
+		vpcID:            vpcID,
+		ruleName:         ruleName,
+		destinationPorts: destinationPorts,
+		protocols:        protocols,
+		sources:          sources,
+	}
 }
 
-func MakeFirewallRuleName(svc *corev1.Service) string {
+func MakeFirewallRuleName(svc *corev1.Service) (name string) {
 	// TODO: Use GenerateLoadBalancerName once merged in
 	clusterID := viper.GetString(utils.CrusoeClusterIDFlag)
-	if len(clusterID) < 5 {
-		return fmt.Sprintf("%s-%s-%s", svc.Name, svc.Namespace, clusterID)
+
+	if len(fmt.Sprintf("%s-%s-%s", svc.Name, svc.Namespace, clusterID[len(clusterID)-5:])) > 60 {
+		name = fmt.Sprintf("%s-%s-%s", svc.Name, svc.Namespace, clusterID[len(clusterID)-5:])[:60]
+	} else {
+		name = fmt.Sprintf("%s-%s-%s", svc.Name, svc.Namespace, clusterID[len(clusterID)-5:])
 	}
-	return fmt.Sprintf("%s-%s-%s", svc.Name, svc.Namespace, clusterID[len(clusterID)-5:])
+
+	return name
 }
 
 func GetFirewallRuleOperationResult(ctx context.Context, crusoeClient *crusoeapi.APIClient, operationID string) (
