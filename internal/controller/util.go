@@ -375,14 +375,30 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 
 			return err
 		}
-		if op != nil && op.State == string(OpFailed) {
-			logger.Info("Firewall rule operation failed, retrying", "result", op.Result)
-			delete(svc.Annotations, FirewallRuleOperationIdKey)
-		} else if firewallRule != nil {
-			logger.Info("Firewall rule operation complete", "ruleName", firewallRule.Name)
+
+		marshalledResult, _ := json.Marshal(op.Result) // ignore error or handle it
+		resultText := strings.ToLower(string(marshalledResult))
+		if op != nil && op.State == string(OpFailed) && strings.Contains(resultText, "already exists") {
+			logger.Info("Firewall rule already exists")
+			rules, _, err := r.CrusoeClient.VPCFirewallRulesApi.ListVPCFirewallRules(ctx, args.projectID)
+			if err != nil {
+				logger.Error(err, "Failed to get firewall rules")
+				return err
+			}
+			for _, rule := range rules.Items {
+				if rule.Name == args.ruleName {
+					svc.Annotations[FirewallRuleIdKey] = rule.Id
+				}
+			}
+			return r.Patch(ctx, svc, client.MergeFrom(svcCopy))
+		} else if op != nil && op.State == string(OpSuccess) {
+			logger.Info("Firewall rule operation complete", "ruleInfo", firewallRule)
 			svc.Annotations[FirewallRuleIdKey] = firewallRule.Id
 
 			return r.Patch(ctx, svc, client.MergeFrom(svcCopy))
+		} else if op != nil && op.State == string(OpFailed) {
+			logger.Info("Firewall rule operation failed, retrying", "result", op.Result)
+			delete(svc.Annotations, FirewallRuleOperationIdKey)
 		} else {
 			logger.Info("Firewall rule operation in progress")
 
@@ -410,7 +426,7 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 	}
 
 	svc.Annotations[FirewallRuleOperationIdKey] = op_resp.Operation.OperationId
-	logger.Info("Created firewall rule", "name", args.ruleName, "operationId", op_resp.Operation.OperationId)
+	logger.Info("Created firewall rule operation", "name", args.ruleName, "operationId", op_resp.Operation.OperationId)
 	return r.Patch(ctx, svc, client.MergeFrom(svcCopy))
 }
 
