@@ -391,14 +391,14 @@ func (r *ServiceReconciler) ensureFirewallRule(ctx context.Context, svc *corev1.
 				}
 			}
 			return r.Patch(ctx, svc, client.MergeFrom(svcCopy))
-		} else if op != nil && op.State == string(OpFailed) {
-			logger.Info("Firewall rule operation failed, retrying", "result", op.Result)
-			delete(svc.Annotations, FirewallRuleOperationIdKey)
 		} else if op != nil && op.State == string(OpSuccess) {
 			logger.Info("Firewall rule operation complete", "ruleInfo", firewallRule)
 			svc.Annotations[FirewallRuleIdKey] = firewallRule.Id
 
 			return r.Patch(ctx, svc, client.MergeFrom(svcCopy))
+		} else if op != nil && op.State == string(OpFailed) {
+			logger.Info("Firewall rule operation failed, retrying", "result", op.Result)
+			delete(svc.Annotations, FirewallRuleOperationIdKey)
 		} else {
 			logger.Info("Firewall rule operation in progress")
 
