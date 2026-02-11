@@ -152,11 +152,20 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 		return ctrl.Result{}, err
 	}
 
+	// Generate unique LB name using service UID for uniqueness across clusters
+	// Service UID is globally unique and persists for the lifetime of the service
+	lbName, err := GenerateLoadBalancerName(svc.Namespace, svc.Name, string(svc.UID))
+	if err != nil {
+		logger.Error(err, "Failed to generate load balancer name", "service", svc.Name, "namespace", svc.Namespace)
+		return ctrl.Result{}, err
+	}
+	logger.Info("Generated load balancer name", "lbName", lbName, "service", svc.Name, "namespace", svc.Namespace, "serviceUID", svc.UID)
+
 	projectId := viper.GetString(CrusoeProjectIDFlag)
 
 	apiPayload := crusoeapi.ExternalLoadBalancerPostRequest{
 		VpcId:                  vpcID,
-		Name:                   svc.Name,
+		Name:                   lbName,
 		Location:               location,
 		Protocol:               "LOAD_BALANCER_PROTOCOL_TCP", // only TCP supported currently
 		ListenPortsAndBackends: listenPortsAndBackends,
