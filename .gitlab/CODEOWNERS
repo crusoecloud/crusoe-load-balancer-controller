@@ -1,13 +1,1 @@
-# default = everyone is codeowner
-* @crusoeenergy/island
-
-# more restrictive ownership for managing this file, adding dependencies, and changing ci/build
-.gitlab/CODEOWNERS @lanwall12 @nitper @ksosnowski3 @bsherrycrusoe @dpattishall
-
-.gitlab-ci.yml     @lanwall12 @nitper @crusoeenergy/island/managed
-.golangci-lint.yml @lanwall12 @nitper @crusoeenergy/island/managed
-go.mod             @lanwall12 @nitper @crusoeenergy/island/managed
-Makefile           @lanwall12 @nitper @crusoeenergy/island/managed
-Dockerfile         @lanwall12 @nitper @crusoeenergy/island/managed
-Dockerfile.*       @lanwall12 @nitper @crusoeenergy/island/managed
-charts/            @lanwall12 @nitper @crusoeenergy/island/managed
+* @crusoeenergy/squads/managed-orchestration
