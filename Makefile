@@ -1,7 +1,7 @@
 # Image URL to use all building/pushing image targets
 IMG ?= pphelan001/controller:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.31.0
+ENVTEST_K8S_VERSION = 1.34.0
 GOLANGCI_VERSION = v1.55.2
 SQLC_VERSION = v1.26.0
 
