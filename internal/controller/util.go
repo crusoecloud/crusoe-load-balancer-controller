@@ -507,7 +507,12 @@ func (r *ServiceReconciler) GetFirewallRuleArgs(ctx context.Context, svc *corev1
 		return nil
 	}
 
-	ruleName := MakeFirewallRuleName(svc)
+	ruleName, err := GenerateLoadBalancerName(svc.Namespace, svc.Name, string(svc.UID))
+	if err != nil {
+		logger.Error(err, "Failed to generate firewall rule name, skipping",
+			"service", svc.Name, "namespace", svc.Namespace)
+		return nil
+	}
 
 	sources := []swagger.FirewallRuleObject{{Cidr: "0.0.0.0/0"}}
 	if len(svc.Spec.LoadBalancerSourceRanges) > 0 {
@@ -551,19 +556,6 @@ func (r *ServiceReconciler) GetFirewallRuleArgs(ctx context.Context, svc *corev1
 		protocols:        protocols,
 		sources:          sources,
 	}
-}
-
-func MakeFirewallRuleName(svc *corev1.Service) (name string) {
-	// TODO: Use GenerateLoadBalancerName once merged in
-	clusterID := viper.GetString(utils.CrusoeClusterIDFlag)
-
-	if len(fmt.Sprintf("%s-%s-%s", svc.Name, svc.Namespace, clusterID[len(clusterID)-5:])) > 60 {
-		name = fmt.Sprintf("%s-%s-%s", svc.Name, svc.Namespace, clusterID[len(clusterID)-5:])[:60]
-	} else {
-		name = fmt.Sprintf("%s-%s-%s", svc.Name, svc.Namespace, clusterID[len(clusterID)-5:])
-	}
-
-	return name
 }
 
 func CompareFirewallRule(ctx context.Context, rule *swagger.VpcFirewallRule, args *firewallRuleArgs) bool {
