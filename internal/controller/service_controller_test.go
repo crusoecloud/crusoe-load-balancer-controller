@@ -34,17 +34,17 @@ var _ = Describe("Service Controller", func() {
 	Context("When generating load balancer names", func() {
 		It("should generate unique LB names for services with different UIDs", func() {
 			// Test that different service UIDs produce different LB names
-			name1, err1 := GenerateLoadBalancerName("default", "nginx", "a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+			name1, err1 := GenerateLoadBalancerResourceName("default", "nginx", "a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 			Expect(err1).NotTo(HaveOccurred())
 
-			name2, err2 := GenerateLoadBalancerName("default", "nginx", "11223344-5566-7788-99aa-bbccddeeff00")
+			name2, err2 := GenerateLoadBalancerResourceName("default", "nginx", "11223344-5566-7788-99aa-bbccddeeff00")
 			Expect(err2).NotTo(HaveOccurred())
 
 			// Names should be different (different service UIDs)
 			Expect(name1).NotTo(Equal(name2))
 
 			// But deterministic for same inputs
-			name1Again, _ := GenerateLoadBalancerName("default", "nginx", "a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+			name1Again, _ := GenerateLoadBalancerResourceName("default", "nginx", "a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 			Expect(name1).To(Equal(name1Again))
 		})
 
@@ -60,7 +60,7 @@ var _ = Describe("Service Controller", func() {
 			}
 
 			for _, tt := range tests {
-				name, err := GenerateLoadBalancerName(tt.namespace, tt.serviceName, tt.serviceUID)
+				name, err := GenerateLoadBalancerResourceName(tt.namespace, tt.serviceName, tt.serviceUID)
 				Expect(err).NotTo(HaveOccurred())
 				Expect(len(name)).To(BeNumerically("<", 50))
 			}
@@ -68,7 +68,7 @@ var _ = Describe("Service Controller", func() {
 
 		It("should handle valid k8s names with dots and hyphens", func() {
 			// Kubernetes allows dots and hyphens in service/namespace names (DNS-1123 compliant)
-			name, err := GenerateLoadBalancerName("my.namespace", "my-service", "a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+			name, err := GenerateLoadBalancerResourceName("my.namespace", "my-service", "a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(len(name)).To(BeNumerically("<", 50))
 			Expect(name).NotTo(BeEmpty())
