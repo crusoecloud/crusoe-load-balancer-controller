@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-func TestGenerateLoadBalancerName(t *testing.T) {
+func TestGenerateLoadBalancerResourceName(t *testing.T) {
 	tests := []struct {
 		name        string
 		namespace   string
@@ -57,32 +57,32 @@ func TestGenerateLoadBalancerName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := GenerateLoadBalancerName(tt.namespace, tt.serviceName, tt.serviceUID)
+			got, err := GenerateLoadBalancerResourceName(tt.namespace, tt.serviceName, tt.serviceUID)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("GenerateLoadBalancerName() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("GenerateLoadBalancerResourceName() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if tt.checkLen && len(got) >= 50 {
-				t.Errorf("GenerateLoadBalancerName() length = %d, want < 50", len(got))
+				t.Errorf("GenerateLoadBalancerResourceName() length = %d, want < 50", len(got))
 			}
 			if !tt.wantErr {
 				// Verify format: should contain namespace, service name (or truncated), and hash
 				if len(got) == 0 {
-					t.Errorf("GenerateLoadBalancerName() returned empty string")
+					t.Errorf("GenerateLoadBalancerResourceName() returned empty string")
 				}
 				// Verify determinism
-				got2, _ := GenerateLoadBalancerName(tt.namespace, tt.serviceName, tt.serviceUID)
+				got2, _ := GenerateLoadBalancerResourceName(tt.namespace, tt.serviceName, tt.serviceUID)
 				if got != got2 {
-					t.Errorf("GenerateLoadBalancerName() not deterministic: got %s and %s", got, got2)
+					t.Errorf("GenerateLoadBalancerResourceName() not deterministic: got %s and %s", got, got2)
 				}
 			}
 		})
 	}
 }
 
-func TestGenerateLoadBalancerNameFormat(t *testing.T) {
+func TestGenerateLoadBalancerResourceNameFormat(t *testing.T) {
 	serviceUID := "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-	name, err := GenerateLoadBalancerName("default", "nginx", serviceUID)
+	name, err := GenerateLoadBalancerResourceName("default", "nginx", serviceUID)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -96,14 +96,14 @@ func TestGenerateLoadBalancerNameFormat(t *testing.T) {
 	t.Logf("Generated name: %s (length: %d)", name, len(name))
 }
 
-func TestGenerateLoadBalancerNameUniqueness(t *testing.T) {
+func TestGenerateLoadBalancerResourceNameUniqueness(t *testing.T) {
 	// Test that different service UIDs produce different names
-	name1, err1 := GenerateLoadBalancerName("default", "nginx", "a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+	name1, err1 := GenerateLoadBalancerResourceName("default", "nginx", "a1b2c3d4-e5f6-7890-abcd-ef1234567890")
 	if err1 != nil {
 		t.Fatalf("Unexpected error for name1: %v", err1)
 	}
 
-	name2, err2 := GenerateLoadBalancerName("default", "nginx", "11223344-5566-7788-99aa-bbccddeeff00")
+	name2, err2 := GenerateLoadBalancerResourceName("default", "nginx", "11223344-5566-7788-99aa-bbccddeeff00")
 	if err2 != nil {
 		t.Fatalf("Unexpected error for name2: %v", err2)
 	}
@@ -114,7 +114,7 @@ func TestGenerateLoadBalancerNameUniqueness(t *testing.T) {
 	}
 
 	// Test that another different UID produces a different name
-	name3, err3 := GenerateLoadBalancerName("default", "nginx", "22334455-6677-8899-aabb-ccddeeff0011")
+	name3, err3 := GenerateLoadBalancerResourceName("default", "nginx", "22334455-6677-8899-aabb-ccddeeff0011")
 	if err3 != nil {
 		t.Fatalf("Unexpected error for name3: %v", err3)
 	}
@@ -124,7 +124,7 @@ func TestGenerateLoadBalancerNameUniqueness(t *testing.T) {
 	}
 }
 
-func TestGenerateLoadBalancerNameWithValidK8sNames(t *testing.T) {
+func TestGenerateLoadBalancerResourceNameWithValidK8sNames(t *testing.T) {
 	// Kubernetes service and namespace names are DNS-1123 compliant
 	// They can contain: lowercase alphanumeric, '-', and '.'
 	// They must start and end with alphanumeric
@@ -156,7 +156,7 @@ func TestGenerateLoadBalancerNameWithValidK8sNames(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := GenerateLoadBalancerName(tt.namespace, tt.serviceName, tt.serviceUID)
+			got, err := GenerateLoadBalancerResourceName(tt.namespace, tt.serviceName, tt.serviceUID)
 			if err != nil {
 				t.Fatalf("Unexpected error: %v", err)
 			}
@@ -167,7 +167,7 @@ func TestGenerateLoadBalancerNameWithValidK8sNames(t *testing.T) {
 			}
 
 			// Verify determinism
-			got2, _ := GenerateLoadBalancerName(tt.namespace, tt.serviceName, tt.serviceUID)
+			got2, _ := GenerateLoadBalancerResourceName(tt.namespace, tt.serviceName, tt.serviceUID)
 			if got != got2 {
 				t.Errorf("Generated name not deterministic: got %s and %s", got, got2)
 			}
@@ -177,7 +177,7 @@ func TestGenerateLoadBalancerNameWithValidK8sNames(t *testing.T) {
 	}
 }
 
-func TestGenerateLoadBalancerNameWithVeryLongInputs(t *testing.T) {
+func TestGenerateLoadBalancerResourceNameWithVeryLongInputs(t *testing.T) {
 	tests := []struct {
 		name        string
 		namespace   string
@@ -233,10 +233,10 @@ func TestGenerateLoadBalancerNameWithVeryLongInputs(t *testing.T) {
 			// Calculate input length for logging
 			inputLen := len(tt.namespace) + len(tt.serviceName) + len(tt.serviceUID)
 
-			got, err := GenerateLoadBalancerName(tt.namespace, tt.serviceName, tt.serviceUID)
+			got, err := GenerateLoadBalancerResourceName(tt.namespace, tt.serviceName, tt.serviceUID)
 
 			if (err != nil) != tt.wantErr {
-				t.Errorf("GenerateLoadBalancerName() error = %v, wantErr %v for %s", err, tt.wantErr, tt.description)
+				t.Errorf("GenerateLoadBalancerResourceName() error = %v, wantErr %v for %s", err, tt.wantErr, tt.description)
 				return
 			}
 
@@ -253,7 +253,7 @@ func TestGenerateLoadBalancerNameWithVeryLongInputs(t *testing.T) {
 			}
 
 			// Verify determinism
-			got2, _ := GenerateLoadBalancerName(tt.namespace, tt.serviceName, tt.serviceUID)
+			got2, _ := GenerateLoadBalancerResourceName(tt.namespace, tt.serviceName, tt.serviceUID)
 			if got != got2 {
 				t.Errorf("Generated name not deterministic: got %s and %s", got, got2)
 			}
@@ -272,7 +272,7 @@ func TestGenerateLoadBalancerNameWithVeryLongInputs(t *testing.T) {
 	}
 }
 
-func TestGenerateLoadBalancerNameEdgeCases(t *testing.T) {
+func TestGenerateLoadBalancerResourceNameEdgeCases(t *testing.T) {
 	tests := []struct {
 		name        string
 		namespace   string
@@ -309,10 +309,10 @@ func TestGenerateLoadBalancerNameEdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := GenerateLoadBalancerName(tt.namespace, tt.serviceName, tt.serviceUID)
+			got, err := GenerateLoadBalancerResourceName(tt.namespace, tt.serviceName, tt.serviceUID)
 
 			if (err != nil) != tt.wantErr {
-				t.Errorf("GenerateLoadBalancerName() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("GenerateLoadBalancerResourceName() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 

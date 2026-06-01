@@ -507,7 +507,7 @@ func (r *ServiceReconciler) GetFirewallRuleArgs(ctx context.Context, svc *corev1
 		return nil
 	}
 
-	ruleName, err := GenerateLoadBalancerName(svc.Namespace, svc.Name, string(svc.UID))
+	ruleName, err := GenerateLoadBalancerResourceName(svc.Namespace, svc.Name, string(svc.UID))
 	if err != nil {
 		logger.Error(err, "Failed to generate firewall rule name, skipping",
 			"service", svc.Name, "namespace", svc.Namespace)
@@ -612,11 +612,12 @@ func GetFirewallRuleOperationResult(ctx context.Context, crusoeClient *crusoeapi
 	return &op, firewallRule, nil
 }
 
-// GenerateLoadBalancerName creates a unique, deterministic name for a load balancer
+// GenerateLoadBalancerResourceName creates a unique, deterministic name shared by
+// a load balancer and its associated firewall rule
 // Format: <namespace>-<service-name>-<8-char-hash>
 // Hash is derived from the Kubernetes service UID to ensure global uniqueness
 // Note: Kubernetes service and namespace names are already DNS-1123 compliant (lowercase alphanumeric, '-', '.')
-func GenerateLoadBalancerName(namespace, serviceName, serviceUID string) (string, error) {
+func GenerateLoadBalancerResourceName(namespace, serviceName, serviceUID string) (string, error) {
 	// Generate hash from service UID
 	// Service UIDs are globally unique across all clusters
 	hash := utils.GenerateServiceHash(serviceUID)
