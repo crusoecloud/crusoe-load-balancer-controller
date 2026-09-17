@@ -143,8 +143,25 @@ func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Service) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	listenPortsAndBackends := r.parseListenPortsAndBackends(ctx, svc, logger)
+	// A load balancer serves a single protocol, fixed at creation time, so it is derived
+	// from the Service's ports before anything is created. A Service whose ports cannot be
+	// served (mixed TCP and UDP, or SCTP) is a spec problem that a retry will not fix, so
+	// the reconcile stops here without requeueing and the Service gets no external IP.
+	protocol, err := DeriveLoadBalancerProtocol(svc)
+	if err != nil {
+		logger.Error(err, "Cannot create load balancer for Service",
+			"name", svc.Name, "namespace", svc.Namespace)
+
+		return ctrl.Result{}, nil
+	}
+
+	listenPortsAndBackends := r.parseListenPortsAndBackends(ctx, servicePortsForProtocol(svc.Spec.Ports, protocol), logger)
 	healthCheckOptions := ParseHealthCheckOptionsFromAnnotations(svc.Annotations)
+
+	if protocol == LoadBalancerProtocolUDP && healthCheckOptions != nil {
+		logger.Info("Health check annotations are set on a UDP load balancer; backend health checking is probe-based and may not reflect UDP reachability",
+			"name", svc.Name, "namespace", svc.Namespace)
+	}
 
 	// Get VPC ID and location information
 	vpcID, location, err := getVPCAndLocationInfo(ctx, r.CrusoeClient, logger)
@@ -167,7 +184,7 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 		VpcId:                  vpcID,
 		Name:                   lbName,
 		Location:               location,
-		Protocol:               "LOAD_BALANCER_PROTOCOL_TCP", // only TCP supported currently
+		Protocol:               protocol,
 		ListenPortsAndBackends: listenPortsAndBackends,
 		HealthCheckOptions:     healthCheckOptions,
 	}
@@ -223,6 +240,9 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 		svc.Annotations = make(map[string]string)
 	}
 	svc.Annotations[loadbalancerIDLabelKey] = loadBalancer.Id
+	// Record the protocol so later reconciles can tell which ports belong on this load
+	// balancer, and can detect a Service edited to a protocol the load balancer cannot adopt.
+	svc.Annotations[AnnotationLoadBalancerProtocol] = protocol
 
 	// Update the Service object in the Kubernetes API
 	err = r.Client.Update(ctx, svc)
@@ -231,7 +251,8 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 		return ctrl.Result{}, err
 	}
 
-	logger.Info("Stored Load Balancer ID in Service annotations", "service", svc.Name, "loadBalancerID", loadBalancer.Id)
+	logger.Info("Stored Load Balancer ID in Service annotations",
+		"service", svc.Name, "loadBalancerID", loadBalancer.Id, "protocol", protocol)
 
 	// Ensure firewall rule has been created if necessary
 	// TODO: Requeue if firewall rule creation fails
@@ -252,10 +273,29 @@ func (r *ServiceReconciler) handleDelete(ctx context.Context, svc *corev1.Servic
 		logger.Error(err, "Failed to delete firewall rule")
 	}
 
+	// A Service can be deleted without ever having had a load balancer created for it,
+	// for example when its ports were rejected. There is nothing to delete, and calling
+	// the API with an empty id would keep the finalizer in place and leave the Service
+	// stuck terminating.
+	if loadBalancerID == "" {
+		logger.Info("No load balancer recorded for Service, nothing to delete",
+			"service", svc.Name, "namespace", svc.Namespace)
+
+		return ctrl.Result{}, nil
+	}
+
 	// Call the API to delete the load balancer
 	projectId := viper.GetString(CrusoeProjectIDFlag)
 	_, httpResp, err := r.CrusoeClient.ExternalLoadBalancersApi.DeleteExternalLoadBalancer(ctx, projectId, loadBalancerID)
 	if err != nil {
+		if httpResp == nil {
+			// Transport-level failure: there is no status code to branch on.
+			logger.Error(err, "Failed to delete load balancer via API",
+				"service", svc.Name, "loadBalancerID", loadBalancerID)
+
+			return ctrl.Result{RequeueAfter: 10 * time.Second}, err
+		}
+
 		statusCode := httpResp.StatusCode
 		switch statusCode {
 		case http.StatusNotFound:

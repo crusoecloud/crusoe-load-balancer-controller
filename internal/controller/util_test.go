@@ -1,7 +1,10 @@
 package controller
 
 import (
+	"errors"
 	"testing"
+
+	corev1 "k8s.io/api/core/v1"
 )
 
 func TestGenerateLoadBalancerResourceName(t *testing.T) {
@@ -323,6 +326,178 @@ func TestGenerateLoadBalancerResourceNameEdgeCases(t *testing.T) {
 				}
 				t.Logf("Test: %s", tt.description)
 				t.Logf("  Generated: %s (length: %d)", got, len(got))
+			}
+		})
+	}
+}
+
+func TestDeriveLoadBalancerProtocol(t *testing.T) {
+	tests := []struct {
+		name      string
+		ports     []corev1.ServicePort
+		want      string
+		wantErr   error
+		rationale string
+	}{
+		{
+			name:      "no ports",
+			ports:     nil,
+			want:      LoadBalancerProtocolTCP,
+			rationale: "a port-less Service produced a TCP load balancer before UDP support",
+		},
+		{
+			name:      "unset protocol defaults to TCP",
+			ports:     []corev1.ServicePort{{Port: 80, NodePort: 30080}},
+			want:      LoadBalancerProtocolTCP,
+			rationale: "Kubernetes defaults spec.ports[].protocol to TCP",
+		},
+		{
+			name:      "explicit TCP",
+			ports:     []corev1.ServicePort{{Port: 53, NodePort: 30053, Protocol: corev1.ProtocolTCP}},
+			want:      LoadBalancerProtocolTCP,
+			rationale: "unchanged behaviour for every Service that worked before",
+		},
+		{
+			name:      "single UDP port",
+			ports:     []corev1.ServicePort{{Port: 53, NodePort: 30530, Protocol: corev1.ProtocolUDP}},
+			want:      LoadBalancerProtocolUDP,
+			rationale: "the case this change exists for",
+		},
+		{
+			name: "several UDP ports",
+			ports: []corev1.ServicePort{
+				{Port: 53, NodePort: 30530, Protocol: corev1.ProtocolUDP},
+				{Port: 853, NodePort: 30853, Protocol: corev1.ProtocolUDP},
+			},
+			want:      LoadBalancerProtocolUDP,
+			rationale: "one protocol across many ports is fine",
+		},
+		{
+			name: "several TCP ports",
+			ports: []corev1.ServicePort{
+				{Port: 80, NodePort: 30080, Protocol: corev1.ProtocolTCP},
+				{Port: 443, NodePort: 30443},
+			},
+			want:      LoadBalancerProtocolTCP,
+			rationale: "explicit and defaulted TCP ports coexist",
+		},
+		{
+			name: "mixed TCP and UDP is rejected",
+			ports: []corev1.ServicePort{
+				{Port: 53, NodePort: 30053, Protocol: corev1.ProtocolTCP},
+				{Port: 53, NodePort: 30530, Protocol: corev1.ProtocolUDP},
+			},
+			wantErr:   errMixedPortProtocols,
+			rationale: "a load balancer carries a single protocol",
+		},
+		{
+			name:      "SCTP is rejected",
+			ports:     []corev1.ServicePort{{Port: 38412, NodePort: 30412, Protocol: corev1.ProtocolSCTP}},
+			wantErr:   errUnsupportedPortProtocol,
+			rationale: "valid in Kubernetes, not offered by Crusoe external load balancers",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := &corev1.Service{Spec: corev1.ServiceSpec{Ports: tt.ports}}
+
+			got, err := DeriveLoadBalancerProtocol(svc)
+
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("DeriveLoadBalancerProtocol() error = %v, want %v (%s)", err, tt.wantErr, tt.rationale)
+				}
+				if got != "" {
+					t.Errorf("DeriveLoadBalancerProtocol() = %q, want empty protocol alongside an error", got)
+				}
+
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("DeriveLoadBalancerProtocol() unexpected error = %v (%s)", err, tt.rationale)
+			}
+			if got != tt.want {
+				t.Errorf("DeriveLoadBalancerProtocol() = %q, want %q (%s)", got, tt.want, tt.rationale)
+			}
+		})
+	}
+}
+
+func TestServicePortsForProtocol(t *testing.T) {
+	tcpExplicit := corev1.ServicePort{Port: 80, NodePort: 30080, Protocol: corev1.ProtocolTCP}
+	tcpDefaulted := corev1.ServicePort{Port: 443, NodePort: 30443}
+	udp := corev1.ServicePort{Port: 53, NodePort: 30530, Protocol: corev1.ProtocolUDP}
+
+	tests := []struct {
+		name       string
+		ports      []corev1.ServicePort
+		lbProtocol string
+		want       []corev1.ServicePort
+	}{
+		{
+			name:       "TCP keeps explicit and defaulted ports",
+			ports:      []corev1.ServicePort{tcpExplicit, tcpDefaulted, udp},
+			lbProtocol: LoadBalancerProtocolTCP,
+			want:       []corev1.ServicePort{tcpExplicit, tcpDefaulted},
+		},
+		{
+			name:       "UDP keeps only UDP ports",
+			ports:      []corev1.ServicePort{tcpExplicit, tcpDefaulted, udp},
+			lbProtocol: LoadBalancerProtocolUDP,
+			want:       []corev1.ServicePort{udp},
+		},
+		{
+			name:       "unknown protocol falls back to TCP",
+			ports:      []corev1.ServicePort{tcpExplicit, udp},
+			lbProtocol: "",
+			want:       []corev1.ServicePort{tcpExplicit},
+		},
+		{
+			name:       "no ports yields no ports",
+			ports:      nil,
+			lbProtocol: LoadBalancerProtocolUDP,
+			want:       []corev1.ServicePort{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := servicePortsForProtocol(tt.ports, tt.lbProtocol)
+
+			if len(got) != len(tt.want) {
+				t.Fatalf("servicePortsForProtocol() returned %d ports, want %d", len(got), len(tt.want))
+			}
+			for i := range got {
+				if got[i].Port != tt.want[i].Port || got[i].NodePort != tt.want[i].NodePort {
+					t.Errorf("servicePortsForProtocol()[%d] = port %d/nodePort %d, want port %d/nodePort %d",
+						i, got[i].Port, got[i].NodePort, tt.want[i].Port, tt.want[i].NodePort)
+				}
+			}
+		})
+	}
+}
+
+func TestIsKnownLoadBalancerProtocol(t *testing.T) {
+	tests := []struct {
+		protocol  string
+		want      bool
+		rationale string
+	}{
+		{LoadBalancerProtocolTCP, true, "written by this controller"},
+		{LoadBalancerProtocolUDP, true, "written by this controller"},
+		{"", false, "absent annotation must fall back to unfiltered legacy behaviour"},
+		{"tcp", false, "the API enum spelling is the only accepted form"},
+		{"LOAD_BALANCER_PROTOCOL_SCTP", false, "not a protocol this controller creates"},
+		{"garbage", false, "the annotation is user-writable and must not be trusted"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.protocol, func(t *testing.T) {
+			if got := isKnownLoadBalancerProtocol(tt.protocol); got != tt.want {
+				t.Errorf("isKnownLoadBalancerProtocol(%q) = %v, want %v (%s)",
+					tt.protocol, got, tt.want, tt.rationale)
 			}
 		})
 	}

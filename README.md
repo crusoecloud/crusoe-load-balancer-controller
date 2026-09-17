@@ -28,6 +28,47 @@ See example values.yml here: @https://github.com/crusoecloud/crusoe-load-balance
 
 ---
 
+## Protocols
+
+The controller supports both TCP and UDP load balancers. The protocol is taken from the
+Service's ports — no annotation is needed:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: coredns
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 53
+      targetPort: 53
+      protocol: UDP
+```
+
+Two constraints come from the Crusoe external load balancer API:
+
+1. **One protocol per load balancer.** The protocol applies to the whole load balancer,
+   not to individual listeners, so a Service cannot mix TCP and UDP ports. The controller
+   refuses to create a load balancer for such a Service and logs why. Split it into one
+   Service per protocol instead — for DNS, that means a UDP Service and a TCP Service in
+   front of the same pods:
+
+   ```
+   coredns       LoadBalancer  10.233.13.73  160.211.64.65   53:30530/UDP
+   coredns-tcp   LoadBalancer  10.233.7.93   216.86.175.103  53:30053/TCP
+   ```
+
+   Each gets its own VIP.
+
+2. **The protocol is fixed at creation.** The update API carries no protocol field, so
+   editing a Service's port protocol after its load balancer exists will not change the
+   load balancer. The controller logs a warning; recreate the Service to change protocol.
+
+SCTP ports are rejected — Crusoe external load balancers do not offer SCTP.
+
+---
+
 ## Firewall Rules
 
 To add a firewall rule to allow traffic to your load balancer based on your service's nodeports, you can use the following annotations in your Service manifest:
