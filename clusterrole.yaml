@@ -14,3 +14,11 @@ rules:
       - list
       - watch
       # Include create, update, patch, delete, etc. if the controller needs to mutate them.
+  # Warning Events on Services (UnsupportedPortProtocol, ProtocolDrift) surface problems in
+  # `kubectl describe svc`. Without this rule the API server rejects them; the controller still works.
+  - apiGroups: [""]
+    resources:
+      - events
+    verbs:
+      - create
+      - patch

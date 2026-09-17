@@ -182,16 +182,21 @@ func encodeQuery(values map[string][]string) string {
 	return buf.String()
 }
 
+// NewHTTPClient returns an http.Client that signs every request with the given Crusoe API key.
+//
+// It is a client of its own on purpose. Installing the signing transport on http.DefaultClient,
+// as this package used to, changes the process-wide default: every request any code makes
+// through it, to any host, then carries a signed Crusoe Authorization header.
+func NewHTTPClient(key, secret string) *http.Client {
+	return &http.Client{Transport: NewAuthenticatingTransport(nil, key, secret)}
+}
+
 // NewCrusoeClient initializes a new Crusoe API client with the given configuration.
 func NewCrusoeClient(host, key, secret, userAgent string) *crusoeapi.APIClient {
 	cfg := crusoeapi.NewConfiguration()
 	cfg.UserAgent = userAgent
 	cfg.BasePath = host
-	if cfg.HTTPClient == nil {
-		cfg.HTTPClient = http.DefaultClient
-	}
-
-	cfg.HTTPClient.Transport = NewAuthenticatingTransport(cfg.HTTPClient.Transport, key, secret)
+	cfg.HTTPClient = NewHTTPClient(key, secret)
 
 	return crusoeapi.NewAPIClient(cfg)
 }
