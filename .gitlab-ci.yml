@@ -2,6 +2,7 @@ include:
   - project: 'crusoeenergy/tools'
     file: '/templates/go.gitlab-ci.yml'
   - '/versions.yml'
+  - component: $CI_SERVER_FQDN/crusoeenergy/tools/wiz-deps@master
 
 variables: # TODO(template) update these if you have go submodules
   TAG_PREFIX: ""
