@@ -735,6 +735,11 @@ func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				return false
 			}
 
+			if isNodeIncluded(oldNode) != isNodeIncluded(newNode) {
+				log.Log.Info("Node load balancer exclusion changed", "node", newNode.Name, "included", isNodeIncluded(newNode))
+				return true
+			}
+
 			oldReady := isNodeReady(oldNode)
 			newReady := isNodeReady(newNode)
 
