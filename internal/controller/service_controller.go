@@ -49,6 +49,11 @@ import (
 
 const CrusoeClusterIDFlag = "crusoe-cluster-id" //nolint:gosec // false positive, this is a flag name
 
+// serviceFinalizer ensures that Reconcile is called when a Service is deleted: the Service stays
+// Terminating until the finalizer is removed, after its load balancer and firewall rule have
+// been cleaned up.
+const serviceFinalizer = "crusoe.ai/crusoe-load-balancer-controller.finalizer"
+
 // firewallRuleRequeueInterval is how long to wait before checking an in-flight firewall
 // rule operation again.
 const firewallRuleRequeueInterval = 10 * time.Second
@@ -132,16 +137,12 @@ func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
-	// Define the finalizer
-	// This ensures that the Reconcile function will be called when the Service is deleted,
-	// and the resource remains in a "terminating" state until the finalizer is removed. This
-	// way the reconciler is able to "see" the service delete
-	finalizer := "crusoe.ai/crusoe-load-balancer-controller.finalizer"
-
-	// Check if the Service is marked for deletion
+	// Check if the Service is marked for deletion. This runs before the load balancer class
+	// check on purpose: a Service of another class that an earlier version of this controller
+	// took over still carries the finalizer, and must not hang in Terminating.
 	if !svc.DeletionTimestamp.IsZero() {
 		// Perform cleanup and remove the finalizer
-		if controllerutil.ContainsFinalizer(svc, finalizer) {
+		if controllerutil.ContainsFinalizer(svc, serviceFinalizer) {
 			logger.Info("Handling Delete operation for Service", "name", req.Name, "namespace", req.Namespace)
 			result, err := r.handleDelete(ctx, svc)
 			if err != nil {
@@ -158,7 +159,7 @@ func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 			// Remove the finalizer
 			logger.Info("Removing finalizer from Service", "name", req.Name, "namespace", req.Namespace)
-			controllerutil.RemoveFinalizer(svc, finalizer)
+			controllerutil.RemoveFinalizer(svc, serviceFinalizer)
 			if err := r.Update(ctx, svc); err != nil {
 				logger.Error(err, "Failed to remove finalizer", "name", req.Name, "namespace", req.Namespace)
 				return ctrl.Result{}, err
@@ -167,10 +168,20 @@ func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
+	// A Service that names a load balancer class belongs to that class's controller, for example
+	// tailscale-operator for loadBalancerClass: tailscale. Taking it over creates a public load
+	// balancer nobody asked for, and fights the owning controller over the Service's status.
+	if !managesLoadBalancerClass(svc) {
+		logger.Info("Service belongs to another load balancer class, leaving it alone",
+			"name", req.Name, "namespace", req.Namespace, "loadBalancerClass", *svc.Spec.LoadBalancerClass)
+
+		return ctrl.Result{}, nil
+	}
+
 	// Add the finalizer if not present
-	if !controllerutil.ContainsFinalizer(svc, finalizer) {
+	if !controllerutil.ContainsFinalizer(svc, serviceFinalizer) {
 		logger.Info("Adding finalizer to Service", "name", req.Name, "namespace", req.Namespace)
-		controllerutil.AddFinalizer(svc, finalizer)
+		controllerutil.AddFinalizer(svc, serviceFinalizer)
 		if err := r.Update(ctx, svc); err != nil {
 			logger.Error(err, "Failed to add finalizer", "name", req.Name, "namespace", req.Namespace)
 			return ctrl.Result{}, err
@@ -628,6 +639,12 @@ func (r *ServiceReconciler) ensureLoadBalancerIngress(ctx context.Context, svc *
 		return 0
 	}
 
+	// Another class's controller owns this status and may clear it on purpose. Restoring a VIP
+	// it cleared starts a write loop between the two controllers.
+	if !managesLoadBalancerClass(svc) {
+		return 0
+	}
+
 	logger := log.FromContext(ctx)
 	loadBalancerID := svc.Annotations[loadbalancerIDLabelKey]
 	projectID := viper.GetString(CrusoeProjectIDFlag)
@@ -708,14 +725,30 @@ func protocolName(lbProtocol string) string {
 	return strings.TrimPrefix(lbProtocol, "LOAD_BALANCER_PROTOCOL_")
 }
 
+// managesLoadBalancerClass reports whether this controller owns a Service's load balancer. It
+// implements the default class only: a Service that sets spec.loadBalancerClass asks for some
+// other implementation.
+func managesLoadBalancerClass(svc *corev1.Service) bool {
+	return svc.Spec.LoadBalancerClass == nil
+}
+
+// isWatchedService reports whether a Service event should reach Reconcile: a LoadBalancer
+// Service of the default class, or any Service still carrying this controller's finalizer, so
+// that one taken over by an earlier version is released when deleted.
+func isWatchedService(obj client.Object) bool {
+	svc, ok := obj.(*corev1.Service)
+	if !ok || svc.Spec.Type != corev1.ServiceTypeLoadBalancer {
+		return false
+	}
+
+	return managesLoadBalancerClass(svc) || controllerutil.ContainsFinalizer(svc, serviceFinalizer)
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	// Define a predicate to filter LoadBalancer services
-	loadBalancerPredicate := predicate.NewPredicateFuncs(func(obj client.Object) bool {
-		svc, ok := obj.(*corev1.Service)
-		return ok && svc.Spec.Type == corev1.ServiceTypeLoadBalancer
-	})
+	loadBalancerPredicate := predicate.NewPredicateFuncs(isWatchedService)
 
 	nodeCreateDeletePredicate := predicate.Funcs{
 		// Called for new Node objects
@@ -767,7 +800,8 @@ func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 		var reqs []reconcile.Request
 		for _, svc := range svcList.Items {
-			if svc.Spec.Type == corev1.ServiceTypeLoadBalancer {
+			// Backends only matter for load balancers this controller manages.
+			if svc.Spec.Type == corev1.ServiceTypeLoadBalancer && managesLoadBalancerClass(&svc) {
 				reqs = append(reqs, reconcile.Request{
 					NamespacedName: types.NamespacedName{
 						Namespace: svc.Namespace,

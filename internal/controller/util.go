@@ -257,6 +257,9 @@ func (r *ServiceReconciler) parseListenPortsAndBackends(ctx context.Context, por
 			}
 		}
 	}
+	// The node list comes back in no fixed order. Sort it so that an unchanged set of nodes
+	// always produces the same backends.
+	sort.Strings(internalIPs)
 	logger.Info("Retrieved internal IPs of nodes", "internalIPs", internalIPs)
 
 	// For each service port, create a mapping to its corresponding node port and backends
