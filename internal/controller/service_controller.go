@@ -167,6 +167,11 @@ func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
+	// A Service with a loadBalancerClass belongs to another controller, e.g. tailscale-operator.
+	if svc.Spec.LoadBalancerClass != nil {
+		return ctrl.Result{}, nil
+	}
+
 	// Add the finalizer if not present
 	if !controllerutil.ContainsFinalizer(svc, finalizer) {
 		logger.Info("Adding finalizer to Service", "name", req.Name, "namespace", req.Namespace)
