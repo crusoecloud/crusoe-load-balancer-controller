@@ -10,6 +10,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 )
 
 func TestBackendsRespectExcludeFromExternalLoadBalancers(t *testing.T) {
@@ -48,5 +49,44 @@ func TestBackendsRespectExcludeFromExternalLoadBalancers(t *testing.T) {
 	slices.Sort(ips)
 	if want := []string{"10.0.0.1", "10.0.0.3"}; !slices.Equal(ips, want) {
 		t.Fatalf("backends = %v, want [10.0.0.1 10.0.0.3]", ips)
+	}
+}
+
+func TestNodeEventsFromExcludedNodesSkipReconcile(t *testing.T) {
+	node := func(excluded, ready bool) *corev1.Node {
+		n := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "n"}}
+		if excluded {
+			n.Labels = map[string]string{corev1.LabelNodeExcludeBalancers: "true"}
+		}
+		status := corev1.ConditionFalse
+		if ready {
+			status = corev1.ConditionTrue
+		}
+		n.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: status}}
+		return n
+	}
+	p := nodeEventPredicate()
+	update := func(old, new *corev1.Node) bool {
+		return p.Update(event.UpdateEvent{ObjectOld: old, ObjectNew: new})
+	}
+
+	for _, tc := range []struct {
+		name string
+		got  bool
+		want bool
+	}{
+		{"create included", p.Create(event.CreateEvent{Object: node(false, false)}), true},
+		{"create excluded", p.Create(event.CreateEvent{Object: node(true, false)}), false},
+		{"delete included", p.Delete(event.DeleteEvent{Object: node(false, true)}), true},
+		{"delete excluded", p.Delete(event.DeleteEvent{Object: node(true, true)}), false},
+		{"included becomes ready", update(node(false, false), node(false, true)), true},
+		{"excluded becomes ready", update(node(true, false), node(true, true)), false},
+		{"exclusion added", update(node(false, true), node(true, true)), true},
+		{"exclusion removed", update(node(true, true), node(false, true)), true},
+		{"no change", update(node(false, true), node(false, true)), false},
+	} {
+		if tc.got != tc.want {
+			t.Errorf("%s: reconcile = %v, want %v", tc.name, tc.got, tc.want)
+		}
 	}
 }

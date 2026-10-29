@@ -713,19 +713,17 @@ func protocolName(lbProtocol string) string {
 	return strings.TrimPrefix(lbProtocol, "LOAD_BALANCER_PROTOCOL_")
 }
 
-// SetupWithManager sets up the controller with the Manager.
-func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
-
-	// Define a predicate to filter LoadBalancer services
-	loadBalancerPredicate := predicate.NewPredicateFuncs(func(obj client.Object) bool {
-		svc, ok := obj.(*corev1.Service)
-		return ok && svc.Spec.Type == corev1.ServiceTypeLoadBalancer
-	})
-
-	nodeCreateDeletePredicate := predicate.Funcs{
-		// Called for new Node objects
+// nodeEventPredicate selects the Node events that can change LB backends. Every reconcile
+// PATCHes each load balancer, so events from excluded nodes are dropped: they are never
+// backends, except when the exclusion itself flips.
+func nodeEventPredicate() predicate.Funcs {
+	included := func(obj client.Object) bool {
+		node, ok := obj.(*corev1.Node)
+		return !ok || isNodeIncluded(node)
+	}
+	return predicate.Funcs{
 		CreateFunc: func(e event.CreateEvent) bool {
-			return true
+			return included(e.Object)
 		},
 		// Called for Node updates e.g. node from not ready to ready
 		UpdateFunc: func(e event.UpdateEvent) bool {
@@ -739,6 +737,9 @@ func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 				log.Log.Info("Node load balancer exclusion changed", "node", newNode.Name, "included", isNodeIncluded(newNode))
 				return true
 			}
+			if !isNodeIncluded(newNode) {
+				return false
+			}
 
 			oldReady := isNodeReady(oldNode)
 			newReady := isNodeReady(newNode)
@@ -751,15 +752,26 @@ func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 			return false // Skip other updates
 		},
-		// Called for Node deletions
 		DeleteFunc: func(e event.DeleteEvent) bool {
-			return true
+			return included(e.Object)
 		},
 		// Rare, generic events are usually no-ops here
 		GenericFunc: func(e event.GenericEvent) bool {
 			return false
 		},
 	}
+}
+
+// SetupWithManager sets up the controller with the Manager.
+func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
+
+	// Define a predicate to filter LoadBalancer services
+	loadBalancerPredicate := predicate.NewPredicateFuncs(func(obj client.Object) bool {
+		svc, ok := obj.(*corev1.Service)
+		return ok && svc.Spec.Type == corev1.ServiceTypeLoadBalancer
+	})
+
+	nodeCreateDeletePredicate := nodeEventPredicate()
 
 	mapNodeToLBServices := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []reconcile.Request {
 
