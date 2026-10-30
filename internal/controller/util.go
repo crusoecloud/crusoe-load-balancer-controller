@@ -230,6 +230,17 @@ func servicePortsForProtocol(ports []corev1.ServicePort, lbProtocol string) []co
 	return matching
 }
 
+// isNodeIncluded mirrors the upstream service controller's nodeIncludedPredicate:
+// a node carrying the label is excluded unless its value parses as false.
+func isNodeIncluded(node *corev1.Node) bool {
+	v, ok := node.Labels[corev1.LabelNodeExcludeBalancers]
+	if !ok {
+		return true
+	}
+	exclude, err := strconv.ParseBool(v)
+	return err == nil && !exclude
+}
+
 func (r *ServiceReconciler) parseListenPortsAndBackends(ctx context.Context, ports []corev1.ServicePort, logger logr.Logger) []crusoeapi.ListenPortAndBackend {
 	listenPortsAndBackends := []crusoeapi.ListenPortAndBackend{}
 
@@ -240,10 +251,10 @@ func (r *ServiceReconciler) parseListenPortsAndBackends(ctx context.Context, por
 		return listenPortsAndBackends
 	}
 
-	// // Filter out only Ready nodes
+	// Filter out only Ready nodes not excluded from external load balancers
 	var readyNodes []corev1.Node
 	for _, node := range nodeList.Items {
-		if isNodeReady(&node) {
+		if isNodeReady(&node) && isNodeIncluded(&node) {
 			readyNodes = append(readyNodes, node)
 		}
 	}
