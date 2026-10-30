@@ -230,8 +230,10 @@ func servicePortsForProtocol(ports []corev1.ServicePort, lbProtocol string) []co
 	return matching
 }
 
-// isNodeIncluded mirrors the upstream service controller's nodeIncludedPredicate:
-// a node carrying the label is excluded unless its value parses as false.
+// isNodeIncluded reports whether a node should be used as a load-balancer backend.
+// A node is excluded if it carries the node.kubernetes.io/exclude-from-external-load-balancers
+// label with a value that does not parse as false — setting it to "false" keeps the node included.
+// Note: upstream Kubernetes excludes on label presence alone, ignoring the value.
 func isNodeIncluded(node *corev1.Node) bool {
 	v, ok := node.Labels[corev1.LabelNodeExcludeBalancers]
 	if !ok {
