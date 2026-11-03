@@ -41,7 +41,7 @@ func TestBackendsRespectExcludeFromExternalLoadBalancers(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("want 1 listen port, got %d", len(got))
 	}
-	var ips []string
+	ips := make([]string, len(got[0].Backends))
 	for _, b := range got[0].Backends {
 		ips = append(ips, b.Ip)
 	}
