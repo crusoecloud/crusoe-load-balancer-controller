@@ -230,6 +230,18 @@ func servicePortsForProtocol(ports []corev1.ServicePort, lbProtocol string) []co
 	return matching
 }
 
+// isNodeIncluded reports whether a node should be used as a load-balancer backend.
+// A node is excluded if it carries the node.kubernetes.io/exclude-from-external-load-balancers
+// label with a value that does not parse as false — setting it to "false" keeps the node included.
+func isNodeIncluded(node *corev1.Node) bool {
+	v, ok := node.Labels[corev1.LabelNodeExcludeBalancers]
+	if !ok {
+		return true
+	}
+	exclude, err := strconv.ParseBool(v)
+	return err == nil && !exclude
+}
+
 func (r *ServiceReconciler) parseListenPortsAndBackends(ctx context.Context, ports []corev1.ServicePort, logger logr.Logger) []crusoeapi.ListenPortAndBackend {
 	listenPortsAndBackends := []crusoeapi.ListenPortAndBackend{}
 
@@ -240,10 +252,10 @@ func (r *ServiceReconciler) parseListenPortsAndBackends(ctx context.Context, por
 		return listenPortsAndBackends
 	}
 
-	// // Filter out only Ready nodes
+	// Filter out only Ready nodes not excluded from external load balancers
 	var readyNodes []corev1.Node
 	for _, node := range nodeList.Items {
-		if isNodeReady(&node) {
+		if isNodeReady(&node) && isNodeIncluded(&node) {
 			readyNodes = append(readyNodes, node)
 		}
 	}
