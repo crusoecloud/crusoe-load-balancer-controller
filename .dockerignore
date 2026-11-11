@@ -1,3 +1,4 @@
-# More info: https://docs.docker.com/engine/reference/builder/#dockerignore-file
-# Ignore build and test binaries.
-bin/
+# Keep the shared platform binaries available to the runtime image.
+.git
+.mise-data
+.cache

@@ -7,6 +7,15 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+const (
+	testDefaultNamespace    = "default"
+	testServiceUIDPrimary   = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+	testServiceUIDSecondary = "11223344-5566-7788-99aa-bbccddeeff00"
+	testServiceUIDTertiary  = "22334455-6677-8899-aabb-ccddeeff0011"
+	testProtocolTCP         = "tcp"
+	testProtocolUDP         = "udp"
+)
+
 func TestGenerateLoadBalancerResourceName(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -18,17 +27,17 @@ func TestGenerateLoadBalancerResourceName(t *testing.T) {
 	}{
 		{
 			name:        "standard service",
-			namespace:   "default",
+			namespace:   testDefaultNamespace,
 			serviceName: "nginx-svc",
-			serviceUID:  "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+			serviceUID:  testServiceUIDPrimary,
 			wantErr:     false,
 			checkLen:    true,
 		},
 		{
 			name:        "long service name should truncate",
-			namespace:   "default",
+			namespace:   testDefaultNamespace,
 			serviceName: "very-long-service-name-that-exceeds-limits-abcdefghijklmnop",
-			serviceUID:  "11223344-5566-7788-99aa-bbccddeeff00",
+			serviceUID:  testServiceUIDSecondary,
 			wantErr:     false,
 			checkLen:    true,
 		},
@@ -36,7 +45,7 @@ func TestGenerateLoadBalancerResourceName(t *testing.T) {
 			name:        "namespace with dots (valid in k8s)",
 			namespace:   "my.namespace",
 			serviceName: "my-service",
-			serviceUID:  "22334455-6677-8899-aabb-ccddeeff0011",
+			serviceUID:  testServiceUIDTertiary,
 			wantErr:     false,
 			checkLen:    true,
 		},
@@ -84,8 +93,8 @@ func TestGenerateLoadBalancerResourceName(t *testing.T) {
 }
 
 func TestGenerateLoadBalancerResourceNameFormat(t *testing.T) {
-	serviceUID := "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-	name, err := GenerateLoadBalancerResourceName("default", "nginx", serviceUID)
+	serviceUID := testServiceUIDPrimary
+	name, err := GenerateLoadBalancerResourceName(testDefaultNamespace, "nginx", serviceUID)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -101,12 +110,12 @@ func TestGenerateLoadBalancerResourceNameFormat(t *testing.T) {
 
 func TestGenerateLoadBalancerResourceNameUniqueness(t *testing.T) {
 	// Test that different service UIDs produce different names
-	name1, err1 := GenerateLoadBalancerResourceName("default", "nginx", "a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+	name1, err1 := GenerateLoadBalancerResourceName(testDefaultNamespace, "nginx", testServiceUIDPrimary)
 	if err1 != nil {
 		t.Fatalf("Unexpected error for name1: %v", err1)
 	}
 
-	name2, err2 := GenerateLoadBalancerResourceName("default", "nginx", "11223344-5566-7788-99aa-bbccddeeff00")
+	name2, err2 := GenerateLoadBalancerResourceName(testDefaultNamespace, "nginx", testServiceUIDSecondary)
 	if err2 != nil {
 		t.Fatalf("Unexpected error for name2: %v", err2)
 	}
@@ -117,7 +126,7 @@ func TestGenerateLoadBalancerResourceNameUniqueness(t *testing.T) {
 	}
 
 	// Test that another different UID produces a different name
-	name3, err3 := GenerateLoadBalancerResourceName("default", "nginx", "22334455-6677-8899-aabb-ccddeeff0011")
+	name3, err3 := GenerateLoadBalancerResourceName(testDefaultNamespace, "nginx", testServiceUIDTertiary)
 	if err3 != nil {
 		t.Fatalf("Unexpected error for name3: %v", err3)
 	}
@@ -141,19 +150,19 @@ func TestGenerateLoadBalancerResourceNameWithValidK8sNames(t *testing.T) {
 			name:        "dots in namespace (valid in k8s)",
 			namespace:   "my.namespace.com",
 			serviceName: "service",
-			serviceUID:  "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+			serviceUID:  testServiceUIDPrimary,
 		},
 		{
 			name:        "dots in service name (valid in k8s)",
-			namespace:   "default",
+			namespace:   testDefaultNamespace,
 			serviceName: "my.service.name",
-			serviceUID:  "11223344-5566-7788-99aa-bbccddeeff00",
+			serviceUID:  testServiceUIDSecondary,
 		},
 		{
 			name:        "hyphens in both",
 			namespace:   "my-namespace",
 			serviceName: "my-service",
-			serviceUID:  "22334455-6677-8899-aabb-ccddeeff0011",
+			serviceUID:  testServiceUIDTertiary,
 		},
 	}
 
@@ -193,7 +202,7 @@ func TestGenerateLoadBalancerResourceNameWithVeryLongInputs(t *testing.T) {
 			name:        "sum of all inputs exceeds 50 chars",
 			namespace:   "very-long-namespace-name",
 			serviceName: "very-long-service-name-that-exceeds-fifty-characters",
-			serviceUID:  "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+			serviceUID:  testServiceUIDPrimary,
 			wantErr:     false,
 			description: "All inputs are long, total > 50 chars, should truncate service name",
 		},
@@ -201,7 +210,7 @@ func TestGenerateLoadBalancerResourceNameWithVeryLongInputs(t *testing.T) {
 			name:        "extremely long service name",
 			namespace:   "production",
 			serviceName: "my-application-with-extremely-long-name-for-load-balancer-service",
-			serviceUID:  "11223344-5566-7788-99aa-bbccddeeff00",
+			serviceUID:  testServiceUIDSecondary,
 			wantErr:     false,
 			description: "Service name alone is > 50 chars, should truncate",
 		},
@@ -209,7 +218,7 @@ func TestGenerateLoadBalancerResourceNameWithVeryLongInputs(t *testing.T) {
 			name:        "long namespace and service",
 			namespace:   "team-platform-infrastructure-services",
 			serviceName: "api-gateway-load-balancer-external",
-			serviceUID:  "22334455-6677-8899-aabb-ccddeeff0011",
+			serviceUID:  testServiceUIDTertiary,
 			wantErr:     true,
 			description: "Namespace too long (40+ chars), should error",
 		},
@@ -288,7 +297,7 @@ func TestGenerateLoadBalancerResourceNameEdgeCases(t *testing.T) {
 			name:        "namespace exactly 40 chars",
 			namespace:   "namespace-that-is-exactly-forty-chars",
 			serviceName: "svc",
-			serviceUID:  "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+			serviceUID:  testServiceUIDPrimary,
 			wantErr:     true,
 			description: "Namespace too long even after accounting for hash",
 		},
@@ -296,15 +305,15 @@ func TestGenerateLoadBalancerResourceNameEdgeCases(t *testing.T) {
 			name:        "namespace 30 chars with short service",
 			namespace:   "this-namespace-is-thirty-char",
 			serviceName: "api",
-			serviceUID:  "11223344-5566-7788-99aa-bbccddeeff00",
+			serviceUID:  testServiceUIDSecondary,
 			wantErr:     false,
 			description: "Should fit with truncation",
 		},
 		{
 			name:        "empty service name edge case",
-			namespace:   "default",
+			namespace:   testDefaultNamespace,
 			serviceName: "",
-			serviceUID:  "22334455-6677-8899-aabb-ccddeeff0011",
+			serviceUID:  testServiceUIDTertiary,
 			wantErr:     false,
 			description: "Empty service name",
 		},
@@ -488,7 +497,7 @@ func TestIsKnownLoadBalancerProtocol(t *testing.T) {
 		{LoadBalancerProtocolTCP, true, "written by this controller"},
 		{LoadBalancerProtocolUDP, true, "written by this controller"},
 		{"", false, "absent annotation must fall back to unfiltered legacy behaviour"},
-		{"tcp", false, "the API enum spelling is the only accepted form"},
+		{testProtocolTCP, false, "the API enum spelling is the only accepted form"},
 		{"LOAD_BALANCER_PROTOCOL_SCTP", false, "not a protocol this controller creates"},
 		{"garbage", false, "the annotation is user-writable and must not be trusted"},
 	}

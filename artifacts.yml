@@ -1,0 +1,6 @@
+version: 2
+images:
+  crusoe-load-balancer-controller:
+    path: .
+    platforms: [linux/amd64]
+    go: [cmd]

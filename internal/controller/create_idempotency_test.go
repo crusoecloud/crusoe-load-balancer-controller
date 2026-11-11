@@ -327,7 +327,7 @@ func TestHandleUpdateLeavesLegacyServiceAsOnMain(t *testing.T) {
 		return // unreachable; tells staticcheck args is non-nil below (SA5011)
 	}
 
-	if want := []string{"tcp", "udp"}; !slices.Equal(args.protocols, want) {
+	if want := []string{testProtocolTCP, testProtocolUDP}; !slices.Equal(args.protocols, want) {
 		t.Errorf("firewall protocols = %v, want %v, as before the upgrade", args.protocols, want)
 	}
 

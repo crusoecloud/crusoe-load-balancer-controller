@@ -25,3 +25,13 @@ go.work
 *.swp
 *.swo
 *~
+
+# Local mise state and shared CI reports.
+.mise-data/
+.cache/
+coverage.out.tmp
+coverage.html
+coverage.xml
+junit.xml
+gl-code-quality-report.json
+public/

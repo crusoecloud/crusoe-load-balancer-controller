@@ -1,0 +1,149 @@
+min_version = "2026.10.17"
+
+[settings]
+experimental = true
+lockfile = true
+idiomatic_version_file_enable_tools = ["go"]
+
+[tools]
+golangci-lint = "{{ env.GOLANGCI_LINT_VERSION | default(value=env.GOLANGCI_VERSION | default(value='2.15.0')) | trim_start(pat='v') }}"
+"go:github.com/boumenot/gocover-cobertura" = "1.4.0"
+sqlc = "{{ env.SQLC_VERSION | default(value='1.26.0') | trim_start(pat='v') }}"
+"go:github.com/golang/mock/mockgen" = "1.6.0"
+"go:sigs.k8s.io/kustomize/kustomize/v5" = "{{ env.KUSTOMIZE_VERSION | default(value='5.5.0') | trim_start(pat='v') }}"
+"go:sigs.k8s.io/controller-tools/cmd/controller-gen" = "{{ env.CONTROLLER_TOOLS_VERSION | default(value='0.16.4') | trim_start(pat='v') }}"
+"go:sigs.k8s.io/controller-runtime/tools/setup-envtest" = "{{ env.ENVTEST_VERSION | default(value='release-0.19') }}"
+
+[task_config]
+includes = ["git::https://git@gitlab.com/crusoeenergy/tools.git//tasks/go.toml?ref=master"]
+
+[env]
+GOPRIVATE = "{{ env.GOPRIVATE | default(value='gitlab.com/crusoeenergy') }}"
+
+[tasks.manifests]
+description = "Generate Kubernetes RBAC, CRDs and webhook manifests"
+run = '${CONTROLLER_GEN:-controller-gen} rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases'
+
+[tasks.generate]
+description = "Generate Kubernetes deepcopy implementations"
+run = '${CONTROLLER_GEN:-controller-gen} object:headerFile="hack/boilerplate.go.txt" paths="./..."'
+
+[tasks.dev]
+description = "Generate manifests and run the existing local controller test suite"
+run = [{ task = "test:integration" }]
+
+[tasks."test:integration"]
+description = "Run unit and controller integration tests with downloaded Kubernetes assets"
+run = [
+  { task = "manifests" },
+  { task = "generate" },
+  { task = "test:envtest" },
+]
+
+[tasks."test:envtest"]
+description = "Download envtest assets and run controller tests (requires integration tag)"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+assets=$("${ENVTEST:-setup-envtest}" use "${ENVTEST_K8S_VERSION:-1.34.0}" --bin-dir "${LOCALBIN:-$PWD/bin}" -p path)
+KUBEBUILDER_ASSETS="$assets" GO_TEST_BUILD_FLAGS="-tags=integration -coverprofile=cover.out ${GO_TEST_BUILD_FLAGS:-}" mise run go:test
+'''
+
+[tasks."test:e2e"]
+description = "Run the existing Kind end-to-end suite"
+run = [
+  { task = "manifests" },
+  { task = "generate" },
+  '''
+#!/usr/bin/env bash
+set -euo pipefail
+command -v kind >/dev/null 2>&1 || { echo "Kind is not installed. Please install Kind manually."; exit 1; }
+kind get clusters | grep -q kind || { echo "No Kind cluster is running. Please start a Kind cluster before running the e2e tests."; exit 1; }
+go test -tags=e2e ./test/e2e/ -v -ginkgo.v
+''',
+]
+
+[tasks.build]
+description = "Generate code and build the local bin/manager executable"
+run = [
+  { task = "manifests" },
+  { task = "generate" },
+  'GO_BUILD_DIR=bin mise run go:build -- -o bin/manager ./cmd/main.go',
+]
+
+[tasks.run]
+description = "Generate code and run the controller locally"
+run = [{ task = "manifests" }, { task = "generate" }, 'go run ./cmd/main.go']
+
+[tasks."image:build"]
+description = "Build the manager image from a shared prebuilt Linux binary"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+arch=$(go env GOARCH)
+CGO_ENABLED=0 GOOS=linux GOARCH="$arch" GO_BUILD_DIR="bin/linux-$arch" mise run go:build ./cmd
+"${CONTAINER_TOOL:-docker}" build -t "${IMG:-pphelan001/controller:latest}" .
+'''
+
+[tasks."image:push"]
+description = "Push the selected manager image"
+run = '"${CONTAINER_TOOL:-docker}" push "${IMG:-pphelan001/controller:latest}"'
+
+[tasks."image:buildx"]
+description = "Build Linux binaries and publish the existing selected platform matrix"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+IFS=, read -r -a platforms <<< "${PLATFORMS:-linux/arm64,linux/amd64}"
+for platform in "${platforms[@]}"; do
+  os=${platform%/*}; arch=${platform#*/}
+  CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" GO_BUILD_DIR="bin/$os-$arch" mise run go:build ./cmd
+done
+"${CONTAINER_TOOL:-docker}" buildx create --name crusoe-load-balancer-controller-builder || true
+"${CONTAINER_TOOL:-docker}" buildx use crusoe-load-balancer-controller-builder
+"${CONTAINER_TOOL:-docker}" buildx build --push --platform="${PLATFORMS:-linux/arm64,linux/amd64}" --tag "${IMG:-pphelan001/controller:latest}" .
+"${CONTAINER_TOOL:-docker}" buildx rm crusoe-load-balancer-controller-builder
+'''
+
+[tasks."installer:build"]
+description = "Generate the consolidated CRD and deployment installer"
+run = [{ task = "manifests" }, { task = "generate" }, '''
+#!/usr/bin/env bash
+set -euo pipefail
+mkdir -p dist
+(cd config/manager && "${KUSTOMIZE:-kustomize}" edit set image "controller=${IMG:-pphelan001/controller:latest}")
+"${KUSTOMIZE:-kustomize}" build config/default > dist/install.yaml
+''']
+
+[tasks."crds:install"]
+description = "Install generated CRDs into the selected cluster"
+run = [{ task = "manifests" }, '''
+#!/usr/bin/env bash
+set -euo pipefail
+"${KUSTOMIZE:-kustomize}" build config/crd | "${KUBECTL:-kubectl}" apply -f -
+''']
+
+[tasks."crds:uninstall"]
+description = "Uninstall generated CRDs from the selected cluster"
+run = [{ task = "manifests" }, '''
+#!/usr/bin/env bash
+set -euo pipefail
+"${KUSTOMIZE:-kustomize}" build config/crd | "${KUBECTL:-kubectl}" delete --ignore-not-found="${IGNORE_NOT_FOUND:-false}" -f -
+''']
+
+[tasks.deploy]
+description = "Generate and deploy the controller into the selected cluster"
+run = [{ task = "manifests" }, '''
+#!/usr/bin/env bash
+set -euo pipefail
+(cd config/manager && "${KUSTOMIZE:-kustomize}" edit set image "controller=${IMG:-pphelan001/controller:latest}")
+"${KUSTOMIZE:-kustomize}" build config/default | "${KUBECTL:-kubectl}" apply -f -
+''']
+
+[tasks.undeploy]
+description = "Undeploy the controller from the selected cluster"
+run = '''
+#!/usr/bin/env bash
+set -euo pipefail
+"${KUSTOMIZE:-kustomize}" build config/default | "${KUBECTL:-kubectl}" delete --ignore-not-found="${IGNORE_NOT_FOUND:-false}" -f -
+'''

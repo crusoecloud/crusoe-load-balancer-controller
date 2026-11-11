@@ -29,21 +29,21 @@ func TestGetFirewallRuleArgsFollowsLoadBalancerProtocol(t *testing.T) {
 		{
 			name:          "pre-UDP load balancer (no recorded protocol) covers every port, as before",
 			ports:         []corev1.ServicePort{tcp, udp},
-			wantProtocols: []string{"tcp", "udp"},
+			wantProtocols: []string{testProtocolTCP, testProtocolUDP},
 			wantPorts:     []string{"30053", "30530"},
 		},
 		{
 			name:          "TCP load balancer covers only its TCP port",
 			lbProtocol:    LoadBalancerProtocolTCP,
 			ports:         []corev1.ServicePort{tcp, udp},
-			wantProtocols: []string{"tcp"},
+			wantProtocols: []string{testProtocolTCP},
 			wantPorts:     []string{"30053"},
 		},
 		{
 			name:          "UDP load balancer covers only its UDP port",
 			lbProtocol:    LoadBalancerProtocolUDP,
 			ports:         []corev1.ServicePort{tcp, udp},
-			wantProtocols: []string{"udp"},
+			wantProtocols: []string{testProtocolUDP},
 			wantPorts:     []string{"30530"},
 		},
 		{

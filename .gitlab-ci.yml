@@ -1,9 +1,23 @@
 include:
-  - project: 'crusoeenergy/tools'
-    file: '/templates/go.gitlab-ci.yml'
-  - '/versions.yml'
+  - component: $CI_SERVER_FQDN/crusoeenergy/tools/mise@master
+  - component: $CI_SERVER_FQDN/crusoeenergy/tools/go@master
+    inputs:
+      major_version: "0"
+      minor_version: "0"
   - component: $CI_SERVER_FQDN/crusoeenergy/tools/wiz-deps@master
 
-variables: # TODO(template) update these if you have go submodules
-  TAG_PREFIX: ""
-  CI_IMAGE: "registry.gitlab.com/crusoeenergy/tools/go-ci-1.26"
+variables:
+  PLATFORMS: "linux/amd64"
+
+# Retain lint on legacy branch, MR, and custom-tag contexts, including schedules.
+# Go downloads modules on demand; pre_go_deps intentionally skips scheduled runs.
+golangci_lint:
+  needs:
+    - job: pre_mise
+      parallel:
+        matrix:
+          - MISE_RUNNER_ARCH: "amd64"
+  rules:
+    - if: '$CI_MERGE_REQUEST_ID || $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH || $CI_COMMIT_BRANCH == "master" || $CI_COMMIT_BRANCH == "auto-gen" || $CI_COMMIT_BRANCH == "dev" || $CI_COMMIT_BRANCH == "prod"'
+      changes: ["**/*"]
+    - if: '$CI_COMMIT_TAG && $CI_COMMIT_TAG !~ /^(.+\/)?v[0-9]+\.[0-9]+\.[0-9]+$/'

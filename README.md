@@ -146,3 +146,21 @@ Neither of these releases a held Service, so don't reach for them:
 - **Removing the ID annotations.** Without a recorded ID, the controller looks the rule up by name.
 - **Setting `crusoe.ai/manage-firewall-rule` to anything other than `"true"`.** That only skips the
   firewall rule, leaving it behind untracked; the load balancer deletion that follows still holds.
+
+## Development tooling
+
+Install [mise](https://mise.jdx.dev/), then run `mise install` once from this checkout.
+Go is selected from `go.mod`; shared tasks are imported from `crusoeenergy/tools`.
+Existing Make targets remain available as mise-backed aliases.
+
+- `make lint` checks without changing files; `make lint-fix` applies fixes.
+- `mise run go:test:cover` and `mise run go:test:race` run unit tests.
+- `make test` generates manifests and code and runs controller integration tests
+  using the existing Kubernetes 1.34.0 envtest assets.
+- `make test-e2e` runs the existing Kind suite with the `e2e` build tag.
+- `make build` writes `bin/manager`; image tasks prepare shared platform binaries
+  and package them in the existing nonroot distroless runtime.
+
+GitLab uses the shared Go artifact publisher for its existing image registry.
+The GitHub GoReleaser/GHCR release workflow and external Helm chart repository
+retain their existing ownership and distribution paths.
