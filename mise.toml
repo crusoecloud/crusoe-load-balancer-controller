@@ -6,13 +6,13 @@ lockfile = true
 idiomatic_version_file_enable_tools = ["go"]
 
 [tools]
-golangci-lint = "{{ env.GOLANGCI_LINT_VERSION | default(value=env.GOLANGCI_VERSION | default(value='2.15.0')) | trim_start(pat='v') }}"
+golangci-lint = "2.15.0"
 "go:github.com/boumenot/gocover-cobertura" = "1.4.0"
-sqlc = "{{ env.SQLC_VERSION | default(value='1.26.0') | trim_start(pat='v') }}"
+sqlc = "1.26.0"
 "go:github.com/golang/mock/mockgen" = "1.6.0"
-"go:sigs.k8s.io/kustomize/kustomize/v5" = "{{ env.KUSTOMIZE_VERSION | default(value='5.5.0') | trim_start(pat='v') }}"
-"go:sigs.k8s.io/controller-tools/cmd/controller-gen" = "{{ env.CONTROLLER_TOOLS_VERSION | default(value='0.16.4') | trim_start(pat='v') }}"
-"go:sigs.k8s.io/controller-runtime/tools/setup-envtest" = "{{ env.ENVTEST_VERSION | default(value='release-0.19') }}"
+"go:sigs.k8s.io/kustomize/kustomize/v5" = "5.5.0"
+"go:sigs.k8s.io/controller-tools/cmd/controller-gen" = "0.16.4"
+"go:sigs.k8s.io/controller-runtime/tools/setup-envtest" = "release-0.19"
 
 [task_config]
 includes = ["git::https://git@gitlab.com/crusoeenergy/tools.git//tasks/go.toml?ref=master"]
