@@ -18,6 +18,7 @@ sqlc = "1.26.0"
 includes = ["git::https://git@gitlab.com/crusoeenergy/tools.git//tasks/go.toml?ref=master"]
 
 [env]
+CGO_ENABLED = "0"
 GOPRIVATE = "{{ env.GOPRIVATE | default(value='gitlab.com/crusoeenergy') }}"
 
 [tasks.manifests]
