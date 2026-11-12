@@ -307,18 +307,39 @@ func (r *ServiceReconciler) parseListenPortsAndBackends(ctx context.Context, por
 // crusoeUserAgent identifies this controller in every request it makes to the Crusoe API.
 const crusoeUserAgent = "crusoe-external-load-balancer-controller/0.0.1"
 
+// apiHTTPClient is the authenticated client GetCrusoeClient built, shared with
+// GetLoadBalancerLookup so both paths authenticate the same way. The service
+// account token source lives inside it, so building it once per process also
+// means one token (and one refresh cycle) instead of one per consumer.
+//
+//nolint:gochecknoglobals // set once at startup by GetCrusoeClient, read-only after
+var apiHTTPClient *http.Client
+
 // GetLoadBalancerLookup returns the direct load balancer lookup handleCreate uses to adopt an
 // existing load balancer, until client-go is upgraded (CRUSOE-111359). Call it after
-// GetCrusoeClient, which binds the configuration it reads.
+// GetCrusoeClient, which binds the configuration it reads and builds the client it shares.
 func GetLoadBalancerLookup() *crusoe.LoadBalancerLookup {
+	httpClient := apiHTTPClient
+	if httpClient == nil {
+		// GetCrusoeClient failed or was skipped; keep the legacy HMAC-only behaviour.
+		httpClient = crusoe.NewHTTPClient(viper.GetString(CrusoeAccessKeyFlag), viper.GetString(CrusoeSecretKeyFlag))
+	}
+
 	return &crusoe.LoadBalancerLookup{
 		BasePath:   viper.GetString(CrusoeAPIEndpointFlag),
-		HTTPClient: crusoe.NewHTTPClient(viper.GetString(CrusoeAccessKeyFlag), viper.GetString(CrusoeSecretKeyFlag)),
+		HTTPClient: httpClient,
 		UserAgent:  crusoeUserAgent,
 	}
 }
 
-//nolint:cyclop // function is already fairly clean
+// GetCrusoeClient builds the Crusoe API client from the environment. When service
+// account credentials (CRUSOE_CLIENT_ID/CRUSOE_CLIENT_SECRET) are present it
+// authenticates with a JWT from the OAuth2 token endpoint, falling back to the
+// HMAC keys (CRUSOE_ACCESS_KEY/CRUSOE_SECRET_KEY) only when the API rejects the
+// token; with no SA credentials it signs with the HMAC keys as before.
+//
+// ctx is held by the token source for JWT refreshes, so callers must pass a
+// process-lifetime context.
 func GetCrusoeClient(ctx context.Context) (*crusoeapi.APIClient, error) {
 	logger := log.FromContext(ctx)
 
@@ -327,15 +348,29 @@ func GetCrusoeClient(ctx context.Context) (*crusoeapi.APIClient, error) {
 		return nil, fmt.Errorf("could not bind env variables from helm: %w", bindErr)
 	}
 
-	logger.Info("Creating Crusoe client with config", "endpoint", viper.GetString(CrusoeAPIEndpointFlag))
-	crusoeClient := crusoe.NewCrusoeClient(
-		viper.GetString(CrusoeAPIEndpointFlag),
-		viper.GetString(CrusoeAccessKeyFlag),
-		viper.GetString(CrusoeSecretKeyFlag),
-		crusoeUserAgent,
+	creds := crusoe.Credentials{
+		AccessKey:    viper.GetString(CrusoeAccessKeyFlag),
+		SecretKey:    viper.GetString(CrusoeSecretKeyFlag),
+		ClientID:     viper.GetString(utils.CrusoeClientIDFlag),
+		ClientSecret: viper.GetString(utils.CrusoeClientSecretFlag),
+		TokenURL:     viper.GetString(utils.CrusoeTokenURLFlag),
+		Audience:     viper.GetString(utils.CrusoeAudienceFlag),
+	}
+
+	logger.Info("Creating Crusoe client with config",
+		"endpoint", viper.GetString(CrusoeAPIEndpointFlag),
+		"serviceAccountAuth", creds.HasServiceAccount(),
+		"hmacAuth", creds.HasHMAC(),
+		"tokenURL", creds.TokenURL,
 	)
 
-	return crusoeClient, nil
+	httpClient, err := crusoe.NewAPIHTTPClient(ctx, creds)
+	if err != nil {
+		return nil, fmt.Errorf("could not build authenticated Crusoe API client: %w", err)
+	}
+	apiHTTPClient = httpClient
+
+	return crusoe.NewCrusoeClient(viper.GetString(CrusoeAPIEndpointFlag), httpClient, crusoeUserAgent), nil
 }
 
 func OpResultToItem[T any](res interface{}) (*T, error) {
@@ -435,16 +470,15 @@ func (r *ServiceReconciler) updateLoadBalancer(
 
 	// Example: gather fields that might change in the external LB
 	lbUpdatePayload := swagger.ExternalLoadBalancerPatchRequest{
-		Id: loadBalancerID, // you'd retrieve from annotation or status
 		// Possibly gather new health check options or listen ports from svc annotations
 		HealthCheckOptions: healthCheckOptions,
 		// For listen ports, you might parse from svc.Spec.Ports
 		ListenPortsAndBackends: listenPortsAndBackends,
 	}
 
-	logger.Info("Updating external load balancer with new specs", "lbID", lbUpdatePayload.Id)
+	logger.Info("Updating external load balancer with new specs", "lbID", loadBalancerID)
 	projectId := viper.GetString(CrusoeProjectIDFlag)
-	_, httpResp, err := r.CrusoeClient.ExternalLoadBalancersApi.UpdateExternalLoadBalancer(ctx, lbUpdatePayload, projectId, loadBalancerID)
+	_, httpResp, err := r.CrusoeClient.LoadBalancersApi.UpdateExternalLoadBalancer(ctx, lbUpdatePayload, projectId, loadBalancerID)
 	if err != nil {
 		logger.Error(err, "Failed to update load balancer via API")
 		return err

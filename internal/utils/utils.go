@@ -28,6 +28,10 @@ const (
 	CrusoeAccessKeyFlag                 = "crusoe-elb-access-key"
 	CrusoeSecretKeyFlag                 = "crusoe-elb-secret-key" //nolint:gosec // false positive, this is a flag name
 	CrusoeClusterIDFlag                 = "crusoe-cluster-id"     //nolint:gosec // false positive, this is a flag name
+	CrusoeClientIDFlag                  = "crusoe-client-id"
+	CrusoeClientSecretFlag              = "crusoe-client-secret" //nolint:gosec // false positive, this is a flag name
+	CrusoeTokenURLFlag                  = "crusoe-token-url"
+	CrusoeAudienceFlag                  = "crusoe-audience"
 	CrusoeProjectIDFlag                 = "crusoe-project-id"
 	CrusoeVPCIDFlag                     = "crusoe-vpc-id"
 	CrusoeSubnetIDFlag                  = "crusoe-subnet-id"
@@ -137,6 +141,18 @@ func BindEnvs() error {
 	}
 	if err := viper.BindEnv(CrusoeSecretKeyFlag, "CRUSOE_SECRET_KEY"); err != nil {
 		return fmt.Errorf("Failed to bind env CRUSOE_SECRET_KEY: %v", err)
+	}
+	if err := viper.BindEnv(CrusoeClientIDFlag, "CRUSOE_CLIENT_ID"); err != nil {
+		return fmt.Errorf("Failed to bind env CRUSOE_CLIENT_ID: %v", err)
+	}
+	if err := viper.BindEnv(CrusoeClientSecretFlag, "CRUSOE_CLIENT_SECRET"); err != nil {
+		return fmt.Errorf("Failed to bind env CRUSOE_CLIENT_SECRET: %v", err)
+	}
+	if err := viper.BindEnv(CrusoeTokenURLFlag, "CRUSOE_TOKEN_URL"); err != nil {
+		return fmt.Errorf("Failed to bind env CRUSOE_TOKEN_URL: %v", err)
+	}
+	if err := viper.BindEnv(CrusoeAudienceFlag, "CRUSOE_AUDIENCE"); err != nil {
+		return fmt.Errorf("Failed to bind env CRUSOE_AUDIENCE: %v", err)
 	}
 	if err := viper.BindEnv(CrusoeProjectIDFlag, "CRUSOE_PROJECT_ID"); err != nil {
 		return fmt.Errorf("Failed to bind env CRUSOE_PROJECT_ID: %v", err)
