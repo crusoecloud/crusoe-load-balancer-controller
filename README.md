@@ -160,6 +160,17 @@ Existing Make targets remain available as mise-backed aliases.
 - `make test-e2e` runs the existing Kind suite with the `e2e` build tag.
 - `make build` writes `bin/manager`; image tasks prepare shared platform binaries
   and package them in the existing nonroot distroless runtime.
+- `make docker-build`, `make docker-push`, and `make docker-buildx` use the shared
+  Docker tasks. `IMG` selects the image, `CONTAINER_TOOL` selects a compatible
+  executable, and `PLATFORMS` selects the Buildx targets (default
+  `linux/arm64,linux/amd64`). `docker-build` prepares a Linux host-architecture
+  binary and builds locally for Kind; `docker-buildx` prepares every selected
+  binary before publishing one multi-platform image. Install Docker/Buildx locally
+  and log in to the target registry before pushing. Select Buildx architectures
+  with `PLATFORMS`; native `--platform` arguments do not select the binaries
+  prepared by this project and are unsupported by these image workflows.
+  The `image:build`, `image:push`, and
+  `image:buildx` mise names remain aliases.
 
 GitLab uses the shared Go artifact publisher for its existing image registry.
 The GitHub GoReleaser/GHCR release workflow and external Helm chart repository

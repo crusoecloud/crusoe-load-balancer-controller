@@ -15,11 +15,17 @@ sqlc = "1.26.0"
 "go:sigs.k8s.io/controller-runtime/tools/setup-envtest" = "release-0.19"
 
 [task_config]
-includes = ["git::https://git@gitlab.com/crusoeenergy/tools.git//tasks/go.toml?ref=master"]
+includes = [
+  "git::https://git@gitlab.com/crusoeenergy/tools.git//tasks/go.toml?ref=master",
+  "git::https://git@gitlab.com/crusoeenergy/tools.git//tasks/docker.toml?ref=master",
+]
 
 [env]
 CGO_ENABLED = "0"
 GOPRIVATE = "{{ env.GOPRIVATE | default(value='gitlab.com/crusoeenergy') }}"
+# Preserve the image commands' defaults for both unset and explicitly empty inputs.
+IMG = "{% if env.IMG | default(value='') %}{{ env.IMG }}{% else %}pphelan001/controller:latest{% endif %}"
+PLATFORMS = "{% if env.PLATFORMS | default(value='') %}{{ env.PLATFORMS }}{% else %}linux/arm64,linux/amd64{% endif %}"
 
 [tasks.manifests]
 description = "Generate Kubernetes RBAC, CRDs and webhook manifests"
@@ -76,34 +82,33 @@ run = [
 description = "Generate code and run the controller locally"
 run = [{ task = "manifests" }, { task = "generate" }, 'go run ./cmd/main.go']
 
-[tasks."image:build"]
-description = "Build the manager image from a shared prebuilt Linux binary"
+[tasks."docker:build"]
+alias = ["image:build"]
+depends = ["image:prepare"]
+
+[tasks."docker:push"]
+alias = ["image:push"]
+
+[tasks."docker:buildx"]
+alias = ["image:buildx"]
+depends = [["image:prepare", "{{ env.PLATFORMS }}"]]
+
+[tasks."image:prepare"]
+description = "Build static manager binaries for the host or a comma-separated platform argument"
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
-arch=$(go env GOARCH)
-CGO_ENABLED=0 GOOS=linux GOARCH="$arch" GO_BUILD_DIR="bin/linux-$arch" mise run go:build ./cmd
-"${CONTAINER_TOOL:-docker}" build -t "${IMG:-pphelan001/controller:latest}" .
-'''
-
-[tasks."image:push"]
-description = "Push the selected manager image"
-run = '"${CONTAINER_TOOL:-docker}" push "${IMG:-pphelan001/controller:latest}"'
-
-[tasks."image:buildx"]
-description = "Build Linux binaries and publish the existing selected platform matrix"
-run = '''
-#!/usr/bin/env bash
-set -euo pipefail
-IFS=, read -r -a platforms <<< "${PLATFORMS:-linux/arm64,linux/amd64}"
+# Match the runtime Dockerfile's bin/<os>-<arch>/cmd layout. Single-platform
+# builds use the host architecture so Kind can load the image locally.
+IFS=, read -r -a platforms <<< "${1:-linux/$(go env GOARCH)}"
 for platform in "${platforms[@]}"; do
+  if [[ ! "${platform}" =~ ^[a-z0-9]+/[a-z0-9]+$ ]]; then
+    echo "Expected an os/arch platform, got: ${platform}" >&2
+    exit 1
+  fi
   os=${platform%/*}; arch=${platform#*/}
   CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" GO_BUILD_DIR="bin/$os-$arch" mise run go:build ./cmd
 done
-"${CONTAINER_TOOL:-docker}" buildx create --name crusoe-load-balancer-controller-builder || true
-"${CONTAINER_TOOL:-docker}" buildx use crusoe-load-balancer-controller-builder
-"${CONTAINER_TOOL:-docker}" buildx build --push --platform="${PLATFORMS:-linux/arm64,linux/amd64}" --tag "${IMG:-pphelan001/controller:latest}" .
-"${CONTAINER_TOOL:-docker}" buildx rm crusoe-load-balancer-controller-builder
 '''
 
 [tasks."installer:build"]
@@ -112,7 +117,7 @@ run = [{ task = "manifests" }, { task = "generate" }, '''
 #!/usr/bin/env bash
 set -euo pipefail
 mkdir -p dist
-(cd config/manager && "${KUSTOMIZE:-kustomize}" edit set image "controller=${IMG:-pphelan001/controller:latest}")
+(cd config/manager && "${KUSTOMIZE:-kustomize}" edit set image "controller=${IMG}")
 "${KUSTOMIZE:-kustomize}" build config/default > dist/install.yaml
 ''']
 
@@ -137,7 +142,7 @@ description = "Generate and deploy the controller into the selected cluster"
 run = [{ task = "manifests" }, '''
 #!/usr/bin/env bash
 set -euo pipefail
-(cd config/manager && "${KUSTOMIZE:-kustomize}" edit set image "controller=${IMG:-pphelan001/controller:latest}")
+(cd config/manager && "${KUSTOMIZE:-kustomize}" edit set image "controller=${IMG}")
 "${KUSTOMIZE:-kustomize}" build config/default | "${KUBECTL:-kubectl}" apply -f -
 ''']
 

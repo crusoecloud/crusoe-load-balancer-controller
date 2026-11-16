@@ -1,7 +1,4 @@
 # Tool versions and workflow logic live in mise.toml.
-IMG ?= pphelan001/controller:latest
-CONTAINER_TOOL ?= docker
-PLATFORMS ?= linux/arm64,linux/amd64
 LOCALBIN ?= $(CURDIR)/bin
 KUBECTL ?= kubectl
 ignore-not-found ?= false
@@ -64,16 +61,16 @@ run: ## Run run.
 	mise run run
 
 .PHONY: docker-build
-docker-build: ## Run image:build.
-	mise run image:build
+docker-build: ## Build the manager image locally.
+	mise run docker:build
 
 .PHONY: docker-push
-docker-push: ## Run image:push.
-	mise run image:push
+docker-push: ## Push the selected manager image.
+	mise run docker:push
 
 .PHONY: docker-buildx
-docker-buildx: ## Run image:buildx.
-	mise run image:buildx
+docker-buildx: ## Build and push the selected platforms.
+	mise run docker:buildx
 
 .PHONY: build-installer
 build-installer: ## Run installer:build.
