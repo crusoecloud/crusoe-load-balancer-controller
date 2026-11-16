@@ -172,8 +172,8 @@ Existing Make targets remain available as mise-backed aliases.
   binary before publishing one multi-platform image. The shared tasks run the
   `DOCKER_PREPARE_TASK` hook once per target before building; this project sets
   it to `image:prepare`. That task uses the supplied target platform, or reads
-  the host architecture at runtime for a plain local build. `PLATFORMS` and
-  native `--platform` arguments select the binaries prepared for Buildx.
+  the host architecture at runtime for a plain local build. `PLATFORMS` selects
+  Buildx targets; `DOCKER_DEFAULT_PLATFORM` selects a plain build's target.
   Install Docker/Buildx locally and log in to the target registry before pushing.
   The shared `image:build`, `image:push`, and `image:buildx` mise aliases preserve
   the existing names.

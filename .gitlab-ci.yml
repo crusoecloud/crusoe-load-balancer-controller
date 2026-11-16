@@ -10,4 +10,4 @@ variables:
   PLATFORMS: "linux/amd64"
   # Validate the stacked shared-task changes before tools !536 reaches master.
   # Remove this pin after that MR merges; local tooling defaults to master.
-  CRUSOE_TOOLS_REF: "cf19e8132bd797df7be8a054daea80c0d0ccd971"
+  CRUSOE_TOOLS_REF: "25591e599bdcf172d6a8a981dc3e5b0bd1dce69e"
