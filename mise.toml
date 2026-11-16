@@ -16,8 +16,8 @@ sqlc = "1.26.0"
 
 [task_config]
 includes = [
-  "git::https://git@gitlab.com/crusoeenergy/tools.git//tasks/go.toml?ref=master",
-  "git::https://git@gitlab.com/crusoeenergy/tools.git//tasks/docker.toml?ref=master",
+  "git::https://git@gitlab.com/crusoeenergy/tools.git//tasks/go.toml?ref={{ env.CRUSOE_TOOLS_REF | default(value='master') }}",
+  "git::https://git@gitlab.com/crusoeenergy/tools.git//tasks/docker.toml?ref={{ env.CRUSOE_TOOLS_REF | default(value='master') }}",
 ]
 
 [env]
@@ -26,6 +26,7 @@ GOPRIVATE = "{{ env.GOPRIVATE | default(value='gitlab.com/crusoeenergy') }}"
 # Preserve the image commands' defaults for both unset and explicitly empty inputs.
 IMG = "{% if env.IMG | default(value='') %}{{ env.IMG }}{% else %}pphelan001/controller:latest{% endif %}"
 PLATFORMS = "{% if env.PLATFORMS | default(value='') %}{{ env.PLATFORMS }}{% else %}linux/arm64,linux/amd64{% endif %}"
+DOCKER_PREPARE_TASK = "image:prepare"
 
 [tasks.manifests]
 description = "Generate Kubernetes RBAC, CRDs and webhook manifests"
@@ -75,40 +76,24 @@ description = "Generate code and build the local bin/manager executable"
 run = [
   { task = "manifests" },
   { task = "generate" },
-  'GO_BUILD_DIR=bin mise run go:build -- -o bin/manager ./cmd/main.go',
+  { task = "go:build", args = ["-o", "bin/manager", "./cmd/main.go"] },
 ]
 
 [tasks.run]
 description = "Generate code and run the controller locally"
 run = [{ task = "manifests" }, { task = "generate" }, 'go run ./cmd/main.go']
 
-[tasks."docker:build"]
-alias = ["image:build"]
-depends = ["image:prepare"]
-
-[tasks."docker:push"]
-alias = ["image:push"]
-
-[tasks."docker:buildx"]
-alias = ["image:buildx"]
-depends = [["image:prepare", "{{ env.PLATFORMS }}"]]
-
 [tasks."image:prepare"]
-description = "Build static manager binaries for the host or a comma-separated platform argument"
+description = "Build the static manager binary for a shared Docker task's target platform"
 run = '''
 #!/usr/bin/env bash
 set -euo pipefail
-# Match the runtime Dockerfile's bin/<os>-<arch>/cmd layout. Single-platform
-# builds use the host architecture so Kind can load the image locally.
-IFS=, read -r -a platforms <<< "${1:-linux/$(go env GOARCH)}"
-for platform in "${platforms[@]}"; do
-  if [[ ! "${platform}" =~ ^[a-z0-9]+/[a-z0-9]+$ ]]; then
-    echo "Expected an os/arch platform, got: ${platform}" >&2
-    exit 1
-  fi
-  os=${platform%/*}; arch=${platform#*/}
-  CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" GO_BUILD_DIR="bin/$os-$arch" mise run go:build ./cmd
-done
+# A plain local build uses the host architecture so Kind can load the image.
+# The shared task supplies each selected platform for cross-platform builds.
+platform="${DOCKER_TARGET_PLATFORM:-linux/$(go env GOARCH)}"
+os=${platform%/*}
+arch=${platform#*/}
+CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" GO_BUILD_DIR="bin/$os-$arch" mise run go:build ./cmd
 '''
 
 [tasks."installer:build"]

@@ -160,17 +160,23 @@ Existing Make targets remain available as mise-backed aliases.
 - `make test-e2e` runs the existing Kind suite with the `e2e` build tag.
 - `make build` writes `bin/manager`; image tasks prepare shared platform binaries
   and package them in the existing nonroot distroless runtime.
+- The `build` workflow orders project generation before shared `go:build` and
+  selects the existing `bin/manager` output. `generate` runs Kubernetes
+  `controller-gen` with this project's boilerplate; shared `go:generate` runs Go
+  directives, which this repository does not define.
 - `make docker-build`, `make docker-push`, and `make docker-buildx` use the shared
   Docker tasks. `IMG` selects the image, `CONTAINER_TOOL` selects a compatible
   executable, and `PLATFORMS` selects the Buildx targets (default
   `linux/arm64,linux/amd64`). `docker-build` prepares a Linux host-architecture
   binary and builds locally for Kind; `docker-buildx` prepares every selected
-  binary before publishing one multi-platform image. Install Docker/Buildx locally
-  and log in to the target registry before pushing. Select Buildx architectures
-  with `PLATFORMS`; native `--platform` arguments do not select the binaries
-  prepared by this project and are unsupported by these image workflows.
-  The `image:build`, `image:push`, and
-  `image:buildx` mise names remain aliases.
+  binary before publishing one multi-platform image. The shared tasks run the
+  `DOCKER_PREPARE_TASK` hook once per target before building; this project sets
+  it to `image:prepare`. That task uses the supplied target platform, or reads
+  the host architecture at runtime for a plain local build. `PLATFORMS` and
+  native `--platform` arguments select the binaries prepared for Buildx.
+  Install Docker/Buildx locally and log in to the target registry before pushing.
+  The shared `image:build`, `image:push`, and `image:buildx` mise aliases preserve
+  the existing names.
 
 GitLab uses the shared Go artifact publisher for its existing image registry.
 The GitHub GoReleaser/GHCR release workflow and external Helm chart repository
