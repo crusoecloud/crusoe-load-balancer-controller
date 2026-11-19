@@ -30,6 +30,10 @@ type Credentials struct {
 	// Audience is sent as the token request's audience parameter. Empty selects
 	// client-go's production default.
 	Audience string
+	// ClusterID labels the auth metrics so a noisy fallback can be traced to the
+	// cluster it comes from. Each controller serves one cluster, so this is a
+	// single constant value per process.
+	ClusterID string
 }
 
 // HasServiceAccount reports whether a service account credential is configured.
@@ -42,19 +46,33 @@ func (c Credentials) HasHMAC() bool {
 	return c.AccessKey != "" && c.SecretKey != ""
 }
 
-// saFallbackTotal counts requests that were retried with the HMAC keys after the
-// service account token was rejected. Per the IAM SA RFC, this metric going
-// silent fleet-wide is the signal that the HMAC keys can be removed.
+// saAuthSuccessTotal counts requests the service account token authenticated
+// successfully, labelled by cluster. It is the denominator the fallback counter
+// needs: fallback_total staying at zero only means "safe to remove HMAC" when
+// success_total is non-zero — otherwise zero fallbacks can just mean the service
+// account was never exercised.
 //
 //nolint:gochecknoglobals // prometheus collectors are registered once, process-wide
-var saFallbackTotal = prometheus.NewCounter(prometheus.CounterOpts{
+var saAuthSuccessTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
+	Name: "crusoe_lb_controller_sa_auth_success_total",
+	Help: "Crusoe API requests authenticated with the service account token (JWT).",
+}, []string{"cluster_id"})
+
+// saFallbackTotal counts requests that were retried with the HMAC keys after the
+// service account token was rejected. Per the IAM SA RFC, this metric going
+// silent fleet-wide (with success_total non-zero) is the signal that the HMAC
+// keys can be removed. The reason label distinguishes an API rejection
+// (unauthorized/forbidden) from a token exchange the auth server refused.
+//
+//nolint:gochecknoglobals // prometheus collectors are registered once, process-wide
+var saFallbackTotal = prometheus.NewCounterVec(prometheus.CounterOpts{
 	Name: "crusoe_lb_controller_sa_auth_fallback_total",
 	Help: "Requests that fell back to HMAC key auth after service account auth was rejected.",
-})
+}, []string{"cluster_id", "reason"})
 
 //nolint:gochecknoinits // controller-runtime's documented pattern for registering custom metrics
 func init() {
-	metrics.Registry.MustRegister(saFallbackTotal)
+	metrics.Registry.MustRegister(saAuthSuccessTotal, saFallbackTotal)
 }
 
 // NewAPIHTTPClient returns the http.Client every Crusoe API call goes through,
@@ -79,17 +97,20 @@ func NewAPIHTTPClient(ctx context.Context, creds Credentials) (*http.Client, err
 
 	if !creds.HasHMAC() {
 		return &http.Client{Transport: saLoggingTransport{
-			inner:    saCfg.HTTPClient.Transport,
-			clientID: creds.ClientID,
+			inner:     saCfg.HTTPClient.Transport,
+			clientID:  creds.ClientID,
+			clusterID: creds.ClusterID,
 		}}, nil
 	}
 
 	return &http.Client{Transport: &fallbackTransport{
 		primary: saLoggingTransport{
-			inner:    saCfg.HTTPClient.Transport,
-			clientID: creds.ClientID,
+			inner:     saCfg.HTTPClient.Transport,
+			clientID:  creds.ClientID,
+			clusterID: creds.ClusterID,
 		},
-		fallback: NewAuthenticatingTransport(nil, creds.AccessKey, creds.SecretKey),
+		fallback:  NewAuthenticatingTransport(nil, creds.AccessKey, creds.SecretKey),
+		clusterID: creds.ClusterID,
 	}}, nil
 }
 
@@ -99,16 +120,19 @@ func NewAPIHTTPClient(ctx context.Context, creds Credentials) (*http.Client, err
 // 401/403, and not a token-fetch error), so a request that then falls back to
 // HMAC is never mislabeled as service-account authenticated.
 type saLoggingTransport struct {
-	inner    http.RoundTripper
-	clientID string
+	inner     http.RoundTripper
+	clientID  string
+	clusterID string
 }
 
 func (t saLoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := t.inner.RoundTrip(req)
 	if err == nil && resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden {
+		saAuthSuccessTotal.WithLabelValues(t.clusterID).Inc()
 		log.Log.WithName("crusoe-auth").Info(
 			"Crusoe API request authenticated with service account token (JWT)",
-			"method", req.Method, "path", req.URL.Path, "status", resp.StatusCode, "clientID", t.clientID,
+			"method", req.Method, "path", req.URL.Path, "status", resp.StatusCode,
+			"clientID", t.clientID, "clusterID", t.clusterID,
 		)
 	}
 
@@ -124,8 +148,9 @@ func (t saLoggingTransport) RoundTrip(req *http.Request) (*http.Response, error)
 // server outage does not, because falling back on those would silently move the
 // fleet off service accounts whenever Hydra has a bad day.
 type fallbackTransport struct {
-	primary  http.RoundTripper
-	fallback http.RoundTripper
+	primary   http.RoundTripper
+	fallback  http.RoundTripper
+	clusterID string
 }
 
 func (t *fallbackTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -134,12 +159,22 @@ func (t *fallbackTransport) RoundTrip(req *http.Request) (*http.Response, error)
 	retry, retryable := cloneForRetry(req)
 
 	resp, err := t.primary.RoundTrip(req)
+
+	// reason classifies why the service account token was rejected, for the metric
+	// label and the log. An empty reason means the request succeeded and no
+	// fallback is needed.
+	var reason string
 	switch {
 	case err != nil:
 		if !isTokenAuthError(err) {
 			return nil, err
 		}
-	case resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden:
+		reason = "token_rejected"
+	case resp.StatusCode == http.StatusUnauthorized:
+		reason = "unauthorized"
+	case resp.StatusCode == http.StatusForbidden:
+		reason = "forbidden"
+	default:
 		return resp, nil
 	}
 
@@ -152,10 +187,11 @@ func (t *fallbackTransport) RoundTrip(req *http.Request) (*http.Response, error)
 		_ = resp.Body.Close()
 	}
 
-	saFallbackTotal.Inc()
+	saFallbackTotal.WithLabelValues(t.clusterID, reason).Inc()
 	log.Log.WithName("crusoe-auth").Info(
 		"service account auth rejected, falling back to HMAC keys",
-		"method", req.Method, "path", req.URL.Path, "error", errString(err),
+		"method", req.Method, "path", req.URL.Path, "reason", reason,
+		"clusterID", t.clusterID, "error", errString(err),
 	)
 
 	//nolint:wrapcheck // transport errors are forwarded untouched, like every RoundTripper

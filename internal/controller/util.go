@@ -355,6 +355,7 @@ func GetCrusoeClient(ctx context.Context) (*crusoeapi.APIClient, error) {
 		ClientSecret: viper.GetString(utils.CrusoeClientSecretFlag),
 		TokenURL:     viper.GetString(utils.CrusoeTokenURLFlag),
 		Audience:     viper.GetString(utils.CrusoeAudienceFlag),
+		ClusterID:    viper.GetString(utils.CrusoeClusterIDFlag),
 	}
 
 	logger.Info("Creating Crusoe client with config",
