@@ -78,13 +78,42 @@ func NewAPIHTTPClient(ctx context.Context, creds Credentials) (*http.Client, err
 	}
 
 	if !creds.HasHMAC() {
-		return saCfg.HTTPClient, nil
+		return &http.Client{Transport: saLoggingTransport{
+			inner:    saCfg.HTTPClient.Transport,
+			clientID: creds.ClientID,
+		}}, nil
 	}
 
 	return &http.Client{Transport: &fallbackTransport{
-		primary:  saCfg.HTTPClient.Transport,
+		primary: saLoggingTransport{
+			inner:    saCfg.HTTPClient.Transport,
+			clientID: creds.ClientID,
+		},
 		fallback: NewAuthenticatingTransport(nil, creds.AccessKey, creds.SecretKey),
 	}}, nil
+}
+
+// saLoggingTransport logs each Crusoe API request the service account path
+// authenticates, so SA usage is visible directly rather than inferred from the
+// absence of a fallback line. It logs only on a response the API accepted (not
+// 401/403, and not a token-fetch error), so a request that then falls back to
+// HMAC is never mislabeled as service-account authenticated.
+type saLoggingTransport struct {
+	inner    http.RoundTripper
+	clientID string
+}
+
+func (t saLoggingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.inner.RoundTrip(req)
+	if err == nil && resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusForbidden {
+		log.Log.WithName("crusoe-auth").Info(
+			"Crusoe API request authenticated with service account token (JWT)",
+			"method", req.Method, "path", req.URL.Path, "status", resp.StatusCode, "clientID", t.clientID,
+		)
+	}
+
+	//nolint:wrapcheck // transport errors are forwarded untouched, like every RoundTripper
+	return resp, err
 }
 
 // fallbackTransport sends every request with the service account token and
