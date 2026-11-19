@@ -32,6 +32,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WORK="$ROOT/.mo-cicd-out/functional"   # inside the repo: kustomize loads ../../config/default
 reports="${MO_REPORTS_DIR:-$WORK}"
 mkdir -p "$WORK" "$reports"
+# Own kubeconfig: kind and kubectl must not change or follow the caller's current context.
+export KUBECONFIG="$WORK/kubeconfig"
+rm -f "$KUBECONFIG"
 log() { printf '== %s\n' "$*"; }
 
 # <name>:<sha> for the controller image, from MO_IMAGES.
@@ -57,7 +60,7 @@ phase() {   # name cmd...
   local secs=$(( $(date +%s) - start ))
   if (( rc == 0 )); then cases+=("<testcase name=\"$name\" time=\"$secs\"/>"); return 0; fi
   cases+=("<testcase name=\"$name\" time=\"$secs\"><failure message=\"exit $rc\"/></testcase>"); failed=$((failed + 1))
-  # Before deploy there is nothing of ours to dump, and kubectl may point at another cluster.
+  # Before deploy there is nothing of ours to dump.
   [[ "$name" == create-cluster || "$name" == load-image ]] || dump_on_failure
   exit "$rc"
 }
