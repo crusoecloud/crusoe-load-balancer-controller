@@ -19,7 +19,7 @@ versioning:
   minor: 0
 
 # registry.gitlab.com/crusoeenergy/island/external/crusoe-load-balancer-controller/<name>
-#   <sha>      pre-merge   |   <sha>-dev, main-dev   post-merge   |   vX.Y.Z, latest   release
+#   <sha>      pre-merge   |   <sha>-dev, main-dev   post-merge
 # The public image is ghcr.io/crusoecloud/crusoe-load-balancer-controller (GitHub
 # goreleaser, Dockerfile.goreleaser); this one is the in-house build of the same code.
 images:
@@ -45,27 +45,8 @@ dry_run:
     strict: true
     values: []
 
-release:
-  latest_tag: true
-  # Releases come from GitHub (see the header). Keep false: turning it on means moving
-  # the GHCR publish into a release hook and retiring .github/workflows/tag-release.yml.
-  promote: false
-
-  # ---- Release engine (mo-release-orchestrator) ------------------------------
-  # With `lane:` empty the engine finds the newest <sha>-dev candidate and ends the run
-  # "no lane configured": nothing is tested or promoted.
-  component: crusoe-load-balancer-controller
-  schedule: { cron: "0 */6 * * *", timezone: UTC }      # UTC only
-  candidates: { source: dev-build, image: crusoe-load-balancer-controller }
-  # Needs Dockerfile.lane + lane/lane.sh (not written: the release engine is out of
-  # scope for now). The chart renders ClusterRoles, so the runner's lane identity needs
-  # cluster-scoped RBAC agreed with the MO CI/CD team first. Empty `lane:` is skipped;
-  # `lane: {}` is refused.
-  lane:
-  #   runner: gke-cloud-dev
-  #   setup:    { image: registry.gitlab.com/crusoeenergy/island/external/crusoe-load-balancer-controller/crusoe-load-balancer-controller-lane, args: [setup],    timeout: 15m }
-  #   test:     { image: registry.gitlab.com/crusoeenergy/island/external/crusoe-load-balancer-controller/crusoe-load-balancer-controller-lane, args: [test],     timeout: 10m }
-  #   teardown: { image: registry.gitlab.com/crusoeenergy/island/external/crusoe-load-balancer-controller/crusoe-load-balancer-controller-lane, args: [teardown], timeout: 10m }
+# No `release:` block. Releases come from GitHub (see the header), and mo-cicd's
+# default `release.promote: false` refuses every promotion.
 
 # Failures on main -> these channels + #mo-cicd-alerts; releases -> these channels.
 # TODO: replace with the team's channel / user-group ID; the bot must be a member.

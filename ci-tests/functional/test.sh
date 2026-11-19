@@ -51,11 +51,15 @@ cases=(); failed=0; pf_pid=""
 phase() {   # name cmd...
   local name="$1"; shift
   local start rc=0; start=$(date +%s)
-  log "$name"; ( set -e; "$@" ) || rc=$?
+  # Bash ignores set -e in a command whose status is tested (`x || y`, `if x`), even
+  # inside a subshell. So phase stops the run itself and no caller tests its status.
+  log "$name"; set +e; ( set -e; "$@" ); rc=$?; set -e
   local secs=$(( $(date +%s) - start ))
-  if (( rc == 0 )); then cases+=("<testcase name=\"$name\" time=\"$secs\"/>")
-  else cases+=("<testcase name=\"$name\" time=\"$secs\"><failure message=\"exit $rc\"/></testcase>"); failed=$((failed + 1)); fi
-  return "$rc"
+  if (( rc == 0 )); then cases+=("<testcase name=\"$name\" time=\"$secs\"/>"); return 0; fi
+  cases+=("<testcase name=\"$name\" time=\"$secs\"><failure message=\"exit $rc\"/></testcase>"); failed=$((failed + 1))
+  # Before deploy there is nothing of ours to dump, and kubectl may point at another cluster.
+  [[ "$name" == create-cluster || "$name" == load-image ]] || dump_on_failure
+  exit "$rc"
 }
 finish() {
   { echo "<testsuite name=\"functional\" tests=\"${#cases[@]}\" failures=\"$failed\">"
@@ -63,6 +67,10 @@ finish() {
   [[ -n "$pf_pid" ]] && kill "$pf_pid" 2>/dev/null || true
   kind delete cluster --name "$CLUSTER" >/dev/null 2>&1 || true
 }
+# The EXIT trap deletes $CLUSTER, so refuse a cluster that this run did not create.
+if kind get clusters 2>/dev/null | grep -qx "$CLUSTER"; then
+  echo "Kind cluster '$CLUSTER' exists. Delete it or set another MO_KIND_CLUSTER." >&2; exit 1
+fi
 trap finish EXIT
 
 create_cluster() {
@@ -167,8 +175,8 @@ dump_on_failure() {
 
 phase create-cluster create_cluster
 phase load-image load_image
-phase deploy deploy || { dump_on_failure; exit 1; }
+phase deploy deploy
 for p in leader_lease metrics services reconciles_ours skips_other_class no_restarts; do
-  phase "${p//_/-}" "$p" || { dump_on_failure; exit 1; }
+  phase "${p//_/-}" "$p"
 done
 log "passed: $image"
