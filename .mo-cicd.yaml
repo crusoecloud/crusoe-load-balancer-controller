@@ -1,0 +1,82 @@
+# mo-cicd configuration for crusoe-load-balancer-controller.
+# Every key is documented in mo-cicd's README and examples.
+#
+# Scope: mo-cicd owns the merge-request gate and the <sha>-dev builds on merge.
+# Public releases stay on GitHub: the GitLab push mirror updates
+# github.com/crusoecloud/crusoe-load-balancer-controller, whose tag-release workflow
+# tags v0.0.N (versions.env + scripts/tag_semver.sh) and runs goreleaser
+# (ghcr.io/crusoecloud/crusoe-load-balancer-controller, signed GitHub Release).
+version: 1
+
+project:
+  name: crusoe-load-balancer-controller
+
+# One version for the repository. Continues the existing v0.0.N tags (versions.env:
+# MAJOR=0, MINOR=0) so a release through mo-cicd, if it is ever turned on, matches
+# the GitHub tags and the addon catalog's pins. Keep in step with versions.env.
+versioning:
+  major: 0
+  minor: 0
+
+# registry.gitlab.com/crusoeenergy/island/external/crusoe-load-balancer-controller/<name>
+#   <sha>      pre-merge   |   <sha>-dev, main-dev   post-merge   |   vX.Y.Z, latest   release
+# The public image is ghcr.io/crusoecloud/crusoe-load-balancer-controller (GitHub
+# goreleaser, Dockerfile.goreleaser); this one is the in-house build of the same code.
+images:
+  - name: crusoe-load-balancer-controller
+    dockerfile: Dockerfile
+    context: .
+    # Same platforms as goreleaser ships. The builder stage runs on $BUILDPLATFORM and
+    # cross-compiles with GOARCH, so arm64 does not run Go under QEMU.
+    platforms: linux/amd64,linux/arm64
+
+# The Helm chart lives in another repository (crusoe-load-balancer-controller-helm-charts,
+# charts/crusoe-lb-controller). config/ is kustomize, linted by yamllint and checkov only.
+charts: []
+
+dry_run:
+  images:
+    build_unlisted: true
+    # Dockerfile.goreleaser only COPYs the binary goreleaser built on GitHub; it cannot
+    # build from source. hadolint still lints it.
+    skip: [Dockerfile.goreleaser]
+  charts:
+    kubernetes_version: "1.31.0"
+    strict: true
+    values: []
+
+release:
+  latest_tag: true
+  # Releases come from GitHub (see the header). Keep false: turning it on means moving
+  # the GHCR publish into a release hook and retiring .github/workflows/tag-release.yml.
+  promote: false
+
+  # ---- Release engine (mo-release-orchestrator) ------------------------------
+  # With `lane:` empty the engine finds the newest <sha>-dev candidate and ends the run
+  # "no lane configured": nothing is tested or promoted.
+  component: crusoe-load-balancer-controller
+  schedule: { cron: "0 */6 * * *", timezone: UTC }      # UTC only
+  candidates: { source: dev-build, image: crusoe-load-balancer-controller }
+  # Needs Dockerfile.lane + lane/lane.sh (not written: the release engine is out of
+  # scope for now). The chart renders ClusterRoles, so the runner's lane identity needs
+  # cluster-scoped RBAC agreed with the MO CI/CD team first. Empty `lane:` is skipped;
+  # `lane: {}` is refused.
+  lane:
+  #   runner: gke-cloud-dev
+  #   setup:    { image: registry.gitlab.com/crusoeenergy/island/external/crusoe-load-balancer-controller/crusoe-load-balancer-controller-lane, args: [setup],    timeout: 15m }
+  #   test:     { image: registry.gitlab.com/crusoeenergy/island/external/crusoe-load-balancer-controller/crusoe-load-balancer-controller-lane, args: [test],     timeout: 10m }
+  #   teardown: { image: registry.gitlab.com/crusoeenergy/island/external/crusoe-load-balancer-controller/crusoe-load-balancer-controller-lane, args: [teardown], timeout: 10m }
+
+# Failures on main -> these channels + #mo-cicd-alerts; releases -> these channels.
+# TODO: replace with the team's channel / user-group ID; the bot must be a member.
+notifications:
+  slack:
+    channels: ["#mo-cicd-alerts"]
+    mention: []
+    on_success: true
+
+tests:
+  languages: [auto]                    # go, shell, docker, yaml as detected
+  shellcheck_severity: warning
+  hadolint_failure_threshold: warning  # both Dockerfiles are clean at warning today
+  yamllint_strict: false

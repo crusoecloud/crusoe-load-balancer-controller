@@ -15,8 +15,10 @@ jobs:
           go-version-file: 'go.mod'
           cache: false
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v3
+        # v7+ of the action runs golangci-lint v2; keep the version equal to the
+        # Makefile's GOLANGCI_LINT_VERSION (mo-cicd lints with that pin in GitLab).
+        uses: golangci/golangci-lint-action@v8
         with:
-          version: v1.62.0
+          version: v2.15.0
           install-mode: goinstall
           args: "--timeout=5m"

@@ -136,22 +136,22 @@ func BindEnvs() error {
 		return fmt.Errorf("bind CrusoeAccessKeyFlag: %w", err)
 	}
 	if err := viper.BindEnv(CrusoeSecretKeyFlag, "CRUSOE_SECRET_KEY"); err != nil {
-		return fmt.Errorf("Failed to bind env CRUSOE_SECRET_KEY: %v", err)
+		return fmt.Errorf("failed to bind env CRUSOE_SECRET_KEY: %w", err)
 	}
 	if err := viper.BindEnv(CrusoeProjectIDFlag, "CRUSOE_PROJECT_ID"); err != nil {
-		return fmt.Errorf("Failed to bind env CRUSOE_PROJECT_ID: %v", err)
+		return fmt.Errorf("failed to bind env CRUSOE_PROJECT_ID: %w", err)
 	}
 	if err := viper.BindEnv(CrusoeVPCIDFlag, "CRUSOE_VPC_ID"); err != nil {
-		return fmt.Errorf("Failed to bind env CRUSOE_VPC_ID: %v", err)
+		return fmt.Errorf("failed to bind env CRUSOE_VPC_ID: %w", err)
 	}
 	if err := viper.BindEnv(NodeNameFlag, "NODE_NAME"); err != nil {
-		return fmt.Errorf("Failed to bind env NODE_NAME: %v", err)
+		return fmt.Errorf("failed to bind env NODE_NAME: %w", err)
 	}
 	if err := viper.BindEnv(CrusoeClusterIDFlag, "CRUSOE_CLUSTER_ID"); err != nil {
-		return fmt.Errorf("Failed to bind env CRUSOE_CLUSTER_ID: %v", err)
+		return fmt.Errorf("failed to bind env CRUSOE_CLUSTER_ID: %w", err)
 	}
 	if err := viper.BindEnv(CrusoeSubnetIDFlag, "CRUSOE_SUBNET_ID"); err != nil {
-		return fmt.Errorf("Failed to bind env CRUSOE_SUBNET_ID: %v", err)
+		return fmt.Errorf("failed to bind env CRUSOE_SUBNET_ID: %w", err)
 	}
 	return nil
 }

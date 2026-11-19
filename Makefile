@@ -1,8 +1,7 @@
 # Image URL to use all building/pushing image targets
-IMG ?= pphelan001/controller:latest
+IMG ?= ghcr.io/crusoecloud/crusoe-load-balancer-controller:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.34.0
-GOLANGCI_VERSION = v1.62.0
 SQLC_VERSION = v1.26.0
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
@@ -47,47 +46,45 @@ help: ## Display this help.
 
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	$(CONTROLLER_GEN) rbac:roleName=manager-role crd webhook paths="./cmd/...;./internal/..." output:crd:artifacts:config=config/crd/bases
 
 .PHONY: dev
 dev: test build-deps ## Runs a build-deps, test, lint
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
-	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
+	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./cmd/...;./internal/..."
 
 .PHONY: test
 test: manifests generate envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
-# TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
-# The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
-# Prometheus and CertManager are installed by default; skip with:
-# - PROMETHEUS_INSTALL_SKIP=true
-# - CERT_MANAGER_INSTALL_SKIP=true
+# Same check as mo-cicd's pre-merge:functional job, on a throwaway Kind cluster with a
+# locally built image (needs docker and kind).
 .PHONY: test-e2e
-test-e2e: manifests generate ## Run the e2e tests. Expected an isolated environment using Kind.
-	@command -v kind >/dev/null 2>&1 || { \
-		echo "Kind is not installed. Please install Kind manually."; \
-		exit 1; \
-	}
-	@kind get clusters | grep -q 'kind' || { \
-		echo "No Kind cluster is running. Please start a Kind cluster before running the e2e tests."; \
-		exit 1; \
-	}
-	go test ./test/e2e/ -v -ginkgo.v
+test-e2e: ## Run the functional tests (ci-tests/functional/test.sh) on a throwaway Kind cluster.
+	$(CONTAINER_TOOL) build -t lbc-e2e:local .
+	MO_IMAGES=lbc-e2e:local MO_KIND_CLUSTER=lbc-e2e ci-tests/functional/test.sh
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter
 	$(GOLANGCI_LINT) run
 
+.PHONY: lint-ci
+lint-ci: golangci-lint ## Run golangci-lint and write golangci-lint.json (code-climate) for CI.
+	$(GOLANGCI_LINT) run --output.code-climate.path=golangci-lint.json --output.text.path=stdout
+
+# mo-cicd runs `make ci` when it exists and trusts it for lint and tests, so it must
+# write tests.xml, coverage.out and golangci-lint.json (mo-cicd converts coverage.out
+# to coverage.xml). The unit tests need envtest binaries, which mo-cicd's fallback
+# test step does not install.
 .PHONY: ci
-ci: build-deps lint ## Runs build-deps, lint
+ci: test-ci lint-ci ## Run unit tests and lint, writing the CI reports.
 
 .PHONY: build-deps
 build-deps: ## Installs build dependencies.
 	@echo "==> $@"
-	@go install github.com/golangci/golangci-lint/cmd/golangci-lint@${GOLANGCI_VERSION}
+	@go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${GOLANGCI_LINT_VERSION}
 	@go install github.com/sqlc-dev/sqlc/cmd/sqlc@${SQLC_VERSION}
 	@go install github.com/golang/mock/mockgen@v1.6.0
 
@@ -96,16 +93,10 @@ lint-fix: golangci-lint ## Run golangci-lint linter and perform fixes
 	$(GOLANGCI_LINT) run --fix
 
 .PHONY: test-ci
-test-ci: ## Runs the go tests with additional options for a CI environment
-	@echo "==> $@"
-	@go mod tidy
-	@git diff --exit-code go.mod go.sum # fail if go.mod is not tidy
-#	@go install github.com/ory/go-acc@${GO_ACC_VERSION}
-#	@go install gotest.tools/gotestsum@${GOTESTSUM_VERSION}
-#	@go install github.com/boumenot/gocover-cobertura@${GOCOVER_VERSION}
-#	@gotestsum --junitfile tests.xml --raw-command -- go-acc -o coverage.out ./... -- -json -tags "$(BUILDTAGS)" -race -v
-#	@go tool cover -func=coverage.out
-#	@gocover-cobertura < coverage.out > coverage.xml
+test-ci: envtest gotestsum ## Run unit tests (envtest) and write tests.xml + coverage.out for CI.
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
+		$(GOTESTSUM) --junitfile tests.xml --format testname -- \
+		$$(go list ./... | grep -v /e2e) -race -covermode atomic -coverprofile coverage.out
 
 
 ##@ Build
@@ -188,12 +179,15 @@ KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
+GOTESTSUM ?= $(LOCALBIN)/gotestsum
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.5.0
 CONTROLLER_TOOLS_VERSION ?= v0.16.4
 ENVTEST_VERSION ?= release-0.19
-GOLANGCI_LINT_VERSION ?= v1.62.0
+# golangci-lint v1 cannot lint a go 1.26 module; mo-cicd reads this pin for its major.
+GOLANGCI_LINT_VERSION ?= v2.15.0
+GOTESTSUM_VERSION ?= v1.13.0
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
@@ -213,7 +207,12 @@ $(ENVTEST): $(LOCALBIN)
 .PHONY: golangci-lint
 golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
 $(GOLANGCI_LINT): $(LOCALBIN)
-	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
+	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
+
+.PHONY: gotestsum
+gotestsum: $(GOTESTSUM) ## Download gotestsum locally if necessary.
+$(GOTESTSUM): $(LOCALBIN)
+	$(call go-install-tool,$(GOTESTSUM),gotest.tools/gotestsum,$(GOTESTSUM_VERSION))
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary

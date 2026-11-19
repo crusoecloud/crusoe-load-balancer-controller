@@ -25,3 +25,13 @@ go.work
 *.swp
 *.swo
 *~
+
+# CI reports (make ci / mo-cicd)
+tests.xml
+coverage.xml
+golangci-lint.json
+
+# mo-cicd local runs and Go caches
+.mo-cicd-out/
+mo-cicd.env
+.cache/

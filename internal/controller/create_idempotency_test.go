@@ -109,7 +109,7 @@ func TestHandleCreateRecordsIDBeforeExternalIP(t *testing.T) {
 	}
 
 	stored := &corev1.Service{}
-	if err := reconciler.Client.Get(context.Background(), client.ObjectKeyFromObject(svc), stored); err != nil {
+	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(svc), stored); err != nil {
 		t.Fatalf("failed to read back the Service: %v", err)
 	}
 
@@ -167,7 +167,7 @@ func TestHandleCreateAdoptsExistingLoadBalancer(t *testing.T) {
 	}
 
 	stored := &corev1.Service{}
-	if err := reconciler.Client.Get(context.Background(), client.ObjectKeyFromObject(svc), stored); err != nil {
+	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(svc), stored); err != nil {
 		t.Fatalf("failed to read back the Service: %v", err)
 	}
 
@@ -217,7 +217,7 @@ func TestHandleUpdateRestoresMissingExternalIP(t *testing.T) {
 	}
 
 	stored := &corev1.Service{}
-	if err := reconciler.Client.Get(context.Background(), client.ObjectKeyFromObject(svc), stored); err != nil {
+	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(svc), stored); err != nil {
 		t.Fatalf("failed to read back the Service: %v", err)
 	}
 
@@ -308,7 +308,7 @@ func TestHandleUpdateLeavesLegacyServiceAsOnMain(t *testing.T) {
 	}
 
 	stored := &corev1.Service{}
-	if err := reconciler.Client.Get(context.Background(), client.ObjectKeyFromObject(svc), stored); err != nil {
+	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(svc), stored); err != nil {
 		t.Fatalf("failed to read back the Service: %v", err)
 	}
 

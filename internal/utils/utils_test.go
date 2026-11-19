@@ -63,7 +63,7 @@ func TestGenerateServiceHashFormat(t *testing.T) {
 
 	// Hash should be 8 hex characters (0-9, a-f)
 	for _, ch := range hash {
-		if !((ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'f')) {
+		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') {
 			t.Errorf("Hash contains invalid hex character: %c in %s", ch, hash)
 		}
 	}
