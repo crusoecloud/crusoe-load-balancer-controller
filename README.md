@@ -156,14 +156,13 @@ this repository has are in `ci-tests/`.
 - **Merge request:** `make ci` (envtest unit tests and golangci-lint v2), shellcheck,
   hadolint, yamllint, a Dockerfile dry-run, the security scans, and two hooks:
   - `ci-tests/pre-merge/test.sh`: `go.mod` is tidy and `make manifests generate` leaves no diff.
-  - `ci-tests/functional/test.sh`: deploys `config/default` with the MR image on a Kind
-    cluster and checks leader election, the metrics endpoint, and that a LoadBalancer
-    Service is reconciled while one with another `loadBalancerClass` is not. Run it
-    locally with `make test-e2e` (needs docker and kind).
+  - `ci-tests/functional/test.sh`: creates a Kind cluster and runs the kubebuilder e2e
+    suite (`test/e2e`): the manager pod runs and the metrics endpoint serves. Run the
+    suite locally with `make test-e2e` against your own Kind cluster.
 - **Merge to `main`:** mo-cicd builds `<sha>-dev` images (linux/amd64, linux/arm64) in
   `registry.gitlab.com/crusoeenergy/island/external/crusoe-load-balancer-controller/crusoe-load-balancer-controller`.
 - **Release:** unchanged, on GitHub. The push mirror updates
   `github.com/crusoecloud/crusoe-load-balancer-controller`; on each push to `main`,
   `.github/workflows/tag-release.yml` tags `v0.0.N` (`versions.env`) and goreleaser
   publishes `ghcr.io/crusoecloud/crusoe-load-balancer-controller` and the GitHub Release.
-  `release.promote` in `.mo-cicd.yaml` stays `false` until that path moves to mo-cicd.
+  mo-cicd's `release.promote` stays off (the default) until that path moves to mo-cicd.

@@ -59,12 +59,22 @@ generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and
 test: manifests generate envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
-# Same check as mo-cicd's pre-merge:functional job, on a throwaway Kind cluster with a
-# locally built image (needs docker and kind).
+# TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
+# The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
+# Prometheus and CertManager are installed by default; skip with:
+# - PROMETHEUS_INSTALL_SKIP=true
+# - CERT_MANAGER_INSTALL_SKIP=true
 .PHONY: test-e2e
-test-e2e: ## Run the functional tests (ci-tests/functional/test.sh) on a throwaway Kind cluster.
-	$(CONTAINER_TOOL) build -t lbc-e2e:local .
-	MO_IMAGES=lbc-e2e:local MO_KIND_CLUSTER=lbc-e2e ci-tests/functional/test.sh
+test-e2e: manifests generate ## Run the e2e tests. Expected an isolated environment using Kind.
+	@command -v kind >/dev/null 2>&1 || { \
+		echo "Kind is not installed. Please install Kind manually."; \
+		exit 1; \
+	}
+	@kind get clusters | grep -q 'kind' || { \
+		echo "No Kind cluster is running. Please start a Kind cluster before running the e2e tests."; \
+		exit 1; \
+	}
+	go test ./test/e2e/ -v -ginkgo.v
 
 .PHONY: lint
 lint: golangci-lint ## Run golangci-lint linter

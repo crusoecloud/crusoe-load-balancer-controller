@@ -20,7 +20,7 @@ release engine are WIP for that reason.
 | 2 | Separate MRs per environment | WIP | Platform (engine tiered rollout). Today the version is pinned in `cmk-addon-catalog` |
 | 3 | Release docs from commits + MRs | WIP | Releases come from goreleaser on GitHub with `changelog.disable: true` (`.goreleaser.yml`); mo-cicd release notes are not used |
 | 4 | Tests shifted left to pre-merge | Done | mo-cicd `pre-merge:lint`, `pre-merge:tests` (`make ci`), dry-runs, `pre-merge:functional` |
-| 5 | Ephemeral test environments | Done | `ci-tests/functional/test.sh`: Kind cluster per MR, deleted at the end |
+| 5 | Ephemeral test environments | Done | `ci-tests/functional/test.sh`: Kind cluster per MR for the e2e suite (`test/e2e`); mo-cicd deletes it at the end |
 
 ## 2. Security & supply chain
 
@@ -67,7 +67,7 @@ release engine are WIP for that reason.
 
 | # | Requirement | Status | Evidence |
 |---|---|---|---|
-| 27 | All non-env-specific tests pre-merge | Done | `make ci`, `ci-tests/pre-merge/test.sh`, `ci-tests/functional/test.sh` |
+| 27 | All non-env-specific tests pre-merge | Done | `make ci`, `ci-tests/pre-merge/test.sh`, `ci-tests/functional/test.sh` (`test/e2e`) |
 | 28 | Lint | Done | golangci-lint v2.15.0 (`.golangci.yml`), shellcheck, hadolint, yamllint (`.yamllint`) |
 | 29 | Unit tests | Done | `make test-ci`: envtest + gotestsum, `tests.xml` JUnit and coverage |
 | 30 | Syntax | Done | mo-cicd `buildx --check` dry-run, yamllint |

@@ -6,7 +6,7 @@
 #
 #   make ci                       envtest unit tests + golangci-lint v2 (mo-cicd runs it)
 #   ci-tests/pre-merge/test.sh    go.mod tidy + `make manifests generate` drift
-#   ci-tests/functional/test.sh   controller on Kind with this MR's image (was test/e2e)
+#   ci-tests/functional/test.sh   Kind cluster + the kubebuilder e2e suite (test/e2e)
 #
 # Old jobs (crusoeenergy/tools go template + wiz-deps):
 #   test_and_lint (make ci = lint only)  -> make ci (now also runs the unit tests)
@@ -30,9 +30,11 @@ variables:
   # go directive (1.26.10); CI runs with GOTOOLCHAIN=local.
   MO_CI_IMAGE: registry.gitlab.com/crusoeenergy/tools/go-ci-1.26:master
 
-# Functional tests (ci-tests/functional/test.sh): one Kind node and the controller.
+# Functional tests (ci-tests/functional/test.sh): one Kind node, Prometheus Operator
+# and the controller (this MR's image). The hook's go test timeout is 30m, so the job
+# gets more.
 pre-merge:functional:
-  timeout: 30m
+  timeout: 45m
   variables:
     KUBERNETES_SERVICE_CPU_REQUEST: "2"
     KUBERNETES_SERVICE_CPU_LIMIT: "4"
