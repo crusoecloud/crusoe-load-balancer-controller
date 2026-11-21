@@ -34,10 +34,10 @@ import (
 const namespace = "crusoe-load-balancer-controller-system"
 
 // serviceAccountName created for the project
-const serviceAccountName = "crusoe-load-balancer-controller-controller-manager"
+const serviceAccountName = "crusoe-lb-controller-controller-manager"
 
 // metricsServiceName is the name of the metrics service of the project
-const metricsServiceName = "crusoe-load-balancer-controller-controller-manager-metrics-service"
+const metricsServiceName = "crusoe-lb-controller-controller-manager-metrics-service"
 
 // metricsRoleBindingName is the name of the RBAC that will be created to allow get the metrics data
 const metricsRoleBindingName = "crusoe-load-balancer-controller-metrics-binding"
@@ -46,18 +46,14 @@ const metricsRoleBindingName = "crusoe-load-balancer-controller-metrics-binding"
 var _ = Describe("Manager", Ordered, func() {
 	var controllerPodName string
 
-	// Before running the tests, set up the environment by creating the namespace,
-	// installing CRDs, and deploying the controller.
+	// Before running the tests, set up the environment by creating the namespace
+	// and deploying the controller. This project has no CRDs (no config/crd), so
+	// the scaffold's `make install` step is removed.
 	BeforeAll(func() {
 		By("creating manager namespace")
 		cmd := exec.Command("kubectl", "create", "ns", namespace)
 		_, err := utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to create namespace")
-
-		By("installing CRDs")
-		cmd = exec.Command("make", "install")
-		_, err = utils.Run(cmd)
-		Expect(err).NotTo(HaveOccurred(), "Failed to install CRDs")
 
 		By("deploying the controller-manager")
 		cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", projectImage))
@@ -65,7 +61,7 @@ var _ = Describe("Manager", Ordered, func() {
 		Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
 	})
 
-	// After all tests have been executed, clean up by undeploying the controller, uninstalling CRDs,
+	// After all tests have been executed, clean up by undeploying the controller
 	// and deleting the namespace.
 	AfterAll(func() {
 		By("cleaning up the curl pod for metrics")
@@ -74,10 +70,6 @@ var _ = Describe("Manager", Ordered, func() {
 
 		By("undeploying the controller-manager")
 		cmd = exec.Command("make", "undeploy")
-		_, _ = utils.Run(cmd)
-
-		By("uninstalling CRDs")
-		cmd = exec.Command("make", "uninstall")
 		_, _ = utils.Run(cmd)
 
 		By("removing manager namespace")
@@ -167,7 +159,7 @@ var _ = Describe("Manager", Ordered, func() {
 		It("should ensure the metrics endpoint is serving metrics", func() {
 			By("creating a ClusterRoleBinding for the service account to allow access to metrics")
 			cmd := exec.Command("kubectl", "create", "clusterrolebinding", metricsRoleBindingName,
-				"--clusterrole=crusoe-load-balancer-controller-metrics-reader",
+				"--clusterrole=crusoe-lb-controller-metrics-reader",
 				fmt.Sprintf("--serviceaccount=%s:%s", namespace, serviceAccountName),
 			)
 			_, err := utils.Run(cmd)

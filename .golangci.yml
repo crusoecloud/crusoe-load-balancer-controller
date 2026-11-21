@@ -1,33 +1,18 @@
+version: "2"
+
 run:
   timeout: 5m
   allow-parallel-runners: true
 
-issues:
-  # don't skip warning about doc comments
-  # don't exclude the default set of lint
-  exclude-use-default: false
-  # restore some of the defaults
-  # (fill in the rest as needed)
-  exclude-rules:
-    - path: "api/*"
-      linters:
-        - lll
-    - path: "internal/*"
-      linters:
-        - dupl
-        - lll
 linters:
-  disable-all: true
+  default: none
   enable:
+    - copyloopvar
     - dupl
     - errcheck
-    - copyloopvar
     - ginkgolinter
     - goconst
     - gocyclo
-    - gofmt
-    - goimports
-    - gosimple
     - govet
     - ineffassign
     - lll
@@ -35,13 +20,30 @@ linters:
     - nakedret
     - prealloc
     - revive
-    - staticcheck
-    - typecheck
+    - staticcheck # includes the former gosimple checks
     - unconvert
     - unparam
     - unused
-
-linters-settings:
-  revive:
+  settings:
+    revive:
+      rules:
+        - name: comment-spacings
+  exclusions:
+    # No preset exclusions: doc-comment warnings stay on (v1 had exclude-use-default: false).
     rules:
-      - name: comment-spacings
+      - path: "api/*"
+        linters:
+          - lll
+      - path: "internal/*"
+        linters:
+          - dupl
+          - lll
+      # Test fixtures repeat IDs and names on purpose.
+      - path: "_test\\.go$"
+        linters:
+          - goconst
+
+formatters:
+  enable:
+    - gofmt
+    - goimports

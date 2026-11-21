@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	crusoeapi "github.com/crusoecloud/client-go/swagger/v1alpha5"
 	swagger "github.com/crusoecloud/client-go/swagger/v1alpha5"
 	"github.com/go-logr/logr"
 	"github.com/ory/viper"
@@ -114,8 +113,8 @@ type firewallRuleArgs struct {
 }
 
 // Function to parse health check options from annotations
-func ParseHealthCheckOptionsFromAnnotations(annotations map[string]string) *crusoeapi.HealthCheckOptionsExternalLb {
-	healthCheckOptions := &crusoeapi.HealthCheckOptionsExternalLb{}
+func ParseHealthCheckOptionsFromAnnotations(annotations map[string]string) *swagger.HealthCheckOptionsExternalLb {
+	healthCheckOptions := &swagger.HealthCheckOptionsExternalLb{}
 
 	// Parse each annotation, falling back to default values if not specified
 	if failureCount, ok := annotations[AnnotationHealthCheckFailureCount]; ok {
@@ -242,12 +241,12 @@ func isNodeIncluded(node *corev1.Node) bool {
 	return err == nil && !exclude
 }
 
-func (r *ServiceReconciler) parseListenPortsAndBackends(ctx context.Context, ports []corev1.ServicePort, logger logr.Logger) []crusoeapi.ListenPortAndBackend {
-	listenPortsAndBackends := []crusoeapi.ListenPortAndBackend{}
+func (r *ServiceReconciler) parseListenPortsAndBackends(ctx context.Context, ports []corev1.ServicePort, logger logr.Logger) []swagger.ListenPortAndBackend {
+	listenPortsAndBackends := []swagger.ListenPortAndBackend{}
 
 	// Retrieve all nodes to extract their internal IPs
 	nodeList := &corev1.NodeList{}
-	if err := r.Client.List(ctx, nodeList); err != nil {
+	if err := r.List(ctx, nodeList); err != nil {
 		logger.Error(err, "Failed to list nodes in the cluster")
 		return listenPortsAndBackends
 	}
@@ -280,9 +279,9 @@ func (r *ServiceReconciler) parseListenPortsAndBackends(ctx context.Context, por
 		}
 
 		// Create backends for this specific port
-		var backends []crusoeapi.Backend
+		var backends []swagger.Backend
 		for _, ip := range internalIPs {
-			backends = append(backends, crusoeapi.Backend{
+			backends = append(backends, swagger.Backend{
 				Ip:   ip,
 				Port: int64(port.NodePort),
 			})
@@ -295,7 +294,7 @@ func (r *ServiceReconciler) parseListenPortsAndBackends(ctx context.Context, por
 			"backends", backends)
 
 		// Add to the list of ListenPortAndBackend
-		listenPortsAndBackends = append(listenPortsAndBackends, crusoeapi.ListenPortAndBackend{
+		listenPortsAndBackends = append(listenPortsAndBackends, swagger.ListenPortAndBackend{
 			ListenPort: int64(port.Port), // The port exposed by the service
 			Backends:   backends,
 		})
@@ -319,7 +318,7 @@ func GetLoadBalancerLookup() *crusoe.LoadBalancerLookup {
 }
 
 //nolint:cyclop // function is already fairly clean
-func GetCrusoeClient(ctx context.Context) (*crusoeapi.APIClient, error) {
+func GetCrusoeClient(ctx context.Context) (*swagger.APIClient, error) {
 	logger := log.FromContext(ctx)
 
 	bindErr := utils.BindEnvs()
@@ -478,7 +477,7 @@ func isSubnetIDProvided() bool {
 }
 
 // getVPCInfoForSelfManagedCluster gets subnet ID from environment variable and fetches VPC info from Crusoe API
-func getVPCInfoForSelfManagedCluster(ctx context.Context, crusoeClient *crusoeapi.APIClient) (vpcID, subnetID, location string, err error) {
+func getVPCInfoForSelfManagedCluster(ctx context.Context, crusoeClient *swagger.APIClient) (vpcID, subnetID, location string, err error) {
 	subnetID = viper.GetString(CrusoeSubnetIDFlag)
 	if subnetID == "" {
 		return "", "", "", fmt.Errorf("CRUSOE_SUBNET_ID environment variable must be defined in helm values if used")
@@ -498,7 +497,7 @@ func getVPCInfoForSelfManagedCluster(ctx context.Context, crusoeClient *crusoeap
 }
 
 // getVPCAndLocationInfo determines VPC ID and location based on cluster type (self-managed vs Crusoe-managed)
-func getVPCAndLocationInfo(ctx context.Context, crusoeClient *crusoeapi.APIClient, logger logr.Logger) (vpcID, location string, err error) {
+func getVPCAndLocationInfo(ctx context.Context, crusoeClient *swagger.APIClient, logger logr.Logger) (vpcID, location string, err error) {
 	logger.Info("Starting getVPCAndLocationInfo")
 
 	if isSubnetIDProvided() {
@@ -1022,7 +1021,7 @@ func CompareFirewallRule(ctx context.Context, rule *swagger.VpcFirewallRule, arg
 // An error wrapping errFirewallRuleOperationUnresolvable means this operation id will never
 // yield a rule id and the caller should recover through the rule's name. Any other error is
 // transient: retry with the operation id intact.
-func GetFirewallRuleOperationResult(ctx context.Context, crusoeClient *crusoeapi.APIClient, operationID string) (
+func GetFirewallRuleOperationResult(ctx context.Context, crusoeClient *swagger.APIClient, operationID string) (
 	*swagger.Operation, *swagger.VpcFirewallRule, error,
 ) {
 	op, httpResp, err := crusoeClient.VPCFirewallRuleOperationsApi.GetNetworkingVPCFirewallRulesOperation(
