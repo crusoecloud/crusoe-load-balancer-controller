@@ -28,6 +28,26 @@ See example values.yml here: @https://github.com/crusoecloud/crusoe-load-balance
 
 ---
 
+## Authentication
+
+The controller supports two credential types, read from the `crusoe-secrets` Secret:
+
+| Env var | Purpose |
+| --- | --- |
+| `CRUSOE_CLIENT_ID` / `CRUSOE_CLIENT_SECRET` | IAM service account (OAuth2 client credentials). The controller exchanges them for a JWT and refreshes it automatically before expiry. |
+| `CRUSOE_TOKEN_URL` | OAuth2 token endpoint. Defaults to production (`https://auth.crusoe.ai/oauth2/token`); non-production environments must set it, e.g. `https://auth.cloud.crusoe.xyz/oauth2/token` for dev. |
+| `CRUSOE_AUDIENCE` | Audience claim requested with the token. Defaults to production (`https://api.crusoe.ai`); must be set together with `CRUSOE_TOKEN_URL` for non-production environments. |
+| `CRUSOE_ACCESS_KEY` / `CRUSOE_SECRET_KEY` | Legacy HMAC API key pair. |
+
+When only one credential type is present it is used directly. When both are present,
+the controller authenticates with the service account first and replays a request with
+the HMAC keys only if the API rejects the token (401/403) — a token endpoint outage or a
+network error does not trigger the fallback. Every fallback is logged and counted in the
+`crusoe_lb_controller_sa_auth_fallback_total` metric; once that metric stays silent, the
+HMAC keys can be removed from the Secret.
+
+---
+
 ## Protocols
 
 The controller supports both TCP and UDP load balancers. The protocol is taken from the

@@ -300,7 +300,7 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 	}
 	logger.Info("Creating load balancer", "payload", apiPayload)
 
-	op_resp, http_resp, err := r.CrusoeClient.ExternalLoadBalancersApi.CreateExternalLoadBalancer(ctx, apiPayload, projectId)
+	op_resp, http_resp, err := r.CrusoeClient.LoadBalancersApi.CreateExternalLoadBalancer(ctx, apiPayload, projectId)
 	if err != nil {
 		logger.Error(err, "Failed to create load balancer via API")
 		// Only retry if this is not a client error (4xx)
@@ -323,7 +323,7 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 	}
 
 	op, err := utils.WaitForOperation(ctx, "Creating ELB ...",
-		op_resp.Operation, projectId, r.CrusoeClient.ExternalLoadBalancerOperationsApi.GetExternalLoadBalancerOperation)
+		op_resp.Operation, projectId, r.CrusoeClient.LoadBalancerOperationsApi.GetExternalLoadBalancerOperation)
 	if err != nil {
 		logger.Error(err, "Failed to create LB Service", "name", svc.Name, "namespace", svc.Namespace)
 		return ctrl.Result{}, err
@@ -453,7 +453,7 @@ func (r *ServiceReconciler) handleDelete(ctx context.Context, svc *corev1.Servic
 
 	// Call the API to delete the load balancer
 	projectId := viper.GetString(CrusoeProjectIDFlag)
-	_, httpResp, err := r.CrusoeClient.ExternalLoadBalancersApi.DeleteExternalLoadBalancer(ctx, projectId, loadBalancerID)
+	_, httpResp, err := r.CrusoeClient.LoadBalancersApi.DeleteExternalLoadBalancer(ctx, projectId, loadBalancerID)
 	if err != nil {
 		if httpResp == nil {
 			// Transport-level failure: there is no status code to branch on.
@@ -637,7 +637,7 @@ func (r *ServiceReconciler) ensureLoadBalancerIngress(ctx context.Context, svc *
 	loadBalancerID := svc.Annotations[loadbalancerIDLabelKey]
 	projectID := viper.GetString(CrusoeProjectIDFlag)
 
-	loadBalancer, _, err := r.CrusoeClient.ExternalLoadBalancersApi.GetExternalLoadBalancer(ctx, projectID, loadBalancerID)
+	loadBalancer, _, err := r.CrusoeClient.LoadBalancersApi.GetExternalLoadBalancer(ctx, projectID, loadBalancerID)
 	if err != nil {
 		logger.Error(err, "Failed to read the load balancer to restore the Service's external IP, will retry",
 			"service", svc.Name, "loadBalancerID", loadBalancerID)

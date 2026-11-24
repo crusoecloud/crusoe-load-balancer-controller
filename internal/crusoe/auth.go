@@ -191,12 +191,13 @@ func NewHTTPClient(key, secret string) *http.Client {
 	return &http.Client{Transport: NewAuthenticatingTransport(nil, key, secret)}
 }
 
-// NewCrusoeClient initializes a new Crusoe API client with the given configuration.
-func NewCrusoeClient(host, key, secret, userAgent string) *crusoeapi.APIClient {
+// NewCrusoeClient initializes a new Crusoe API client around httpClient, which
+// carries the authentication; see NewAPIHTTPClient.
+func NewCrusoeClient(host string, httpClient *http.Client, userAgent string) *crusoeapi.APIClient {
 	cfg := crusoeapi.NewConfiguration()
 	cfg.UserAgent = userAgent
 	cfg.BasePath = host
-	cfg.HTTPClient = NewHTTPClient(key, secret)
+	cfg.HTTPClient = httpClient
 
 	return crusoeapi.NewAPIClient(cfg)
 }
