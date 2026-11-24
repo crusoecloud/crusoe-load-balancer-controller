@@ -1,0 +1,13 @@
+# checkov settings for mo-cicd's security:repo fallback scan (checkov -d .).
+# Every skip carries its reason; do not add one you cannot explain.
+skip-check:
+  # HEALTHCHECK: the distroless image has no shell; liveness/readiness are the
+  # Deployment's probes (/healthz, /readyz).
+  - CKV_DOCKER_2
+  # config/ is a kustomize base: the namespace (CKV_K8S_21) and the image tag/digest
+  # (CKV_K8S_14, CKV_K8S_43) are set by the overlay at deploy time, not in the base.
+  - CKV_K8S_21
+  - CKV_K8S_14
+  - CKV_K8S_43
+  # The controller talks to the Kubernetes API, so it needs its service-account token.
+  - CKV_K8S_38

@@ -51,7 +51,7 @@ func TestReconcileKeepsFinalizerWhileCleanupPending(t *testing.T) {
 	}
 
 	stored := &corev1.Service{}
-	if err := reconciler.Client.Get(context.Background(), client.ObjectKeyFromObject(svc), stored); err != nil {
+	if err := reconciler.Get(context.Background(), client.ObjectKeyFromObject(svc), stored); err != nil {
 		t.Fatalf("the Service must still exist while cleanup is pending, got: %v", err)
 	}
 
@@ -86,7 +86,7 @@ func TestReconcileReleasesServiceWithoutLoadBalancer(t *testing.T) {
 		t.Fatalf("expected the Service to be released without a requeue, got %+v, %v", result, err)
 	}
 
-	err = reconciler.Client.Get(context.Background(), client.ObjectKeyFromObject(svc), &corev1.Service{})
+	err = reconciler.Get(context.Background(), client.ObjectKeyFromObject(svc), &corev1.Service{})
 	if !apierrors.IsNotFound(err) {
 		t.Errorf("with the finalizer removed the Service must be gone, got: %v", err)
 	}

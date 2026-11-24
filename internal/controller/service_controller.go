@@ -28,7 +28,6 @@ import (
 	"lb_controller/internal/crusoe"
 	utils "lb_controller/internal/utils"
 
-	crusoeapi "github.com/crusoecloud/client-go/swagger/v1alpha5"
 	swagger "github.com/crusoecloud/client-go/swagger/v1alpha5"
 	"github.com/ory/viper"
 	corev1 "k8s.io/api/core/v1"
@@ -57,7 +56,7 @@ const firewallRuleRequeueInterval = 10 * time.Second
 type ServiceReconciler struct {
 	client.Client
 	Scheme       *runtime.Scheme
-	CrusoeClient *crusoeapi.APIClient
+	CrusoeClient *swagger.APIClient
 
 	// APIReader reads straight from the API server, bypassing the informer cache. handleCreate
 	// uses it to confirm no load balancer has been recorded on a Service before creating one,
@@ -106,6 +105,7 @@ const loadBalancerIngressRequeueInterval = 10 * time.Second
 // +kubebuilder:rbac:groups=core,resources=services/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=core,resources=services/finalizers,verbs=update
 // +kubebuilder:rbac:groups=core,resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups=core,resources=nodes,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -121,7 +121,7 @@ func (r *ServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	// Fetch the Service object
 	svc := &corev1.Service{}
-	err := r.Client.Get(ctx, req.NamespacedName, svc)
+	err := r.Get(ctx, req.NamespacedName, svc)
 	if err != nil {
 		if client.IgnoreNotFound(err) != nil {
 			logger.Error(err, "Failed to fetch Service", "name", req.Name, "namespace", req.Namespace)
@@ -290,7 +290,7 @@ func (r *ServiceReconciler) handleCreate(ctx context.Context, svc *corev1.Servic
 		return r.recordLoadBalancer(ctx, svc, existing, protocol)
 	}
 
-	apiPayload := crusoeapi.ExternalLoadBalancerPostRequest{
+	apiPayload := swagger.ExternalLoadBalancerPostRequest{
 		VpcId:                  vpcID,
 		Name:                   lbName,
 		Location:               location,
@@ -787,7 +787,7 @@ func (r *ServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		log.Log.Info("Node event received", "node", node.Name)
 		// List all LB Services and enqueue each
 		svcList := &corev1.ServiceList{}
-		if err := r.Client.List(ctx, svcList); err != nil {
+		if err := r.List(ctx, svcList); err != nil {
 			// On error, return no requests
 			return nil
 		}

@@ -166,3 +166,23 @@ Neither of these releases a held Service, so don't reach for them:
 - **Removing the ID annotations.** Without a recorded ID, the controller looks the rule up by name.
 - **Setting `crusoe.ai/manage-firewall-rule` to anything other than `"true"`.** That only skips the
   firewall rule, leaving it behind untracked; the load balancer deletion that follows still holds.
+
+## CI/CD and releases
+
+GitLab CI runs the shared [mo-cicd](https://gitlab.com/crusoeenergy/island/managed/mo-cicd)
+template. The settings for this repository are in `.mo-cicd.yaml`; the checks that only
+this repository has are in `ci-tests/`.
+
+- **Merge request:** `make ci` (envtest unit tests and golangci-lint v2), shellcheck,
+  hadolint, yamllint, a Dockerfile dry-run, the security scans, and two hooks:
+  - `ci-tests/pre-merge/test.sh`: `go.mod` is tidy and `make manifests generate` leaves no diff.
+  - `ci-tests/functional/test.sh`: creates a Kind cluster and runs the kubebuilder e2e
+    suite (`test/e2e`): the manager pod runs and the metrics endpoint serves. Run the
+    suite locally with `make test-e2e` against your own Kind cluster.
+- **Merge to `main`:** mo-cicd builds `<sha>-dev` images (linux/amd64, linux/arm64) in
+  `registry.gitlab.com/crusoeenergy/island/external/crusoe-load-balancer-controller/crusoe-load-balancer-controller`.
+- **Release:** unchanged, on GitHub. The push mirror updates
+  `github.com/crusoecloud/crusoe-load-balancer-controller`; on each push to `main`,
+  `.github/workflows/tag-release.yml` tags `v0.0.N` (`versions.env`) and goreleaser
+  publishes `ghcr.io/crusoecloud/crusoe-load-balancer-controller` and the GitHub Release.
+  mo-cicd's `release.promote` stays off (the default) until that path moves to mo-cicd.

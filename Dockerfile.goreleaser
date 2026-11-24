@@ -1,6 +1,7 @@
 ################################################################
 # STEP 2: build a small image and run crusoe-load-balancer-controller binary #
 ################################################################
+# checkov:skip=CKV_DOCKER_3:the released image runs as root today; adding USER changes what GitHub ships, tracked as debt
 FROM alpine:3.20.3
 
 COPY crusoe-load-balancer-controller /usr/local/go/bin/crusoe-load-balancer-controller

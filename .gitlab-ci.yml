@@ -1,9 +1,42 @@
+# crusoe-load-balancer-controller — CI/CD via mo-cicd.
+#
+# Everything (lint, unit tests, Dockerfile dry-runs, image builds, security scanners,
+# -dev artifacts on merge, Slack) is inherited from mo-cicd; what is specific to this
+# repository lives in .mo-cicd.yaml and ci-tests/<stage>/test.sh:
+#
+#   make ci                       envtest unit tests + golangci-lint v2 (mo-cicd runs it)
+#   ci-tests/pre-merge/test.sh    go.mod tidy + `make manifests generate` drift
+#   ci-tests/functional/test.sh   Kind cluster + the kubebuilder e2e suite (test/e2e)
+#
+# Old jobs (crusoeenergy/tools go template + wiz-deps):
+#   test_and_lint (make ci = lint only)  -> make ci (now also runs the unit tests)
+#   build_and_push                       -> images: in .mo-cicd.yaml (<sha>, <sha>-dev)
+#   tag_semver, versions.yml             -> dropped: v0.0.N tags come from GitHub's
+#                                           tag-release workflow (versions.env)
+#   SAST / secret / IaC / dependency / container scanning, wiz-deps
+#                                        -> mo-cicd security:* jobs
+#   code_intelligence                    -> dropped (DevX legacy)
+#
+# Releases are not cut here: the push mirror to GitHub runs tag-release.yml, which tags
+# v0.0.N and publishes ghcr.io/crusoecloud/crusoe-load-balancer-controller.
 include:
-  - project: 'crusoeenergy/tools'
-    file: '/templates/go.gitlab-ci.yml'
-  - '/versions.yml'
-  - component: $CI_SERVER_FQDN/crusoeenergy/tools/wiz-deps@master
+  - project: crusoeenergy/island/managed/mo-cicd
+    ref: main
+    file: /templates/managed.gitlab-ci.yml
 
-variables: # TODO(template) update these if you have go submodules
-  TAG_PREFIX: ""
-  CI_IMAGE: "registry.gitlab.com/crusoeenergy/tools/go-ci-1.26"
+variables:
+  MO_CICD_REF: main            # keep equal to the include ref above
+  # The job image for pre-merge:tests and pre-merge:functional: a go-ci image >= go.mod's
+  # go directive (1.26.10); CI runs with GOTOOLCHAIN=local.
+  MO_CI_IMAGE: registry.gitlab.com/crusoeenergy/tools/go-ci-1.26:master
+
+# Functional tests (ci-tests/functional/test.sh): one Kind node, Prometheus Operator
+# and the controller (this MR's image). The hook's go test timeout is 30m, so the job
+# gets more.
+pre-merge:functional:
+  timeout: 45m
+  variables:
+    KUBERNETES_SERVICE_CPU_REQUEST: "2"
+    KUBERNETES_SERVICE_CPU_LIMIT: "4"
+    KUBERNETES_SERVICE_MEMORY_REQUEST: "4Gi"
+    KUBERNETES_SERVICE_MEMORY_LIMIT: "8Gi"

@@ -1,0 +1,10 @@
+# yamllint settings for mo-cicd's pre-merge lint.
+extends: relaxed
+rules:
+  line-length: disable
+  document-start: disable
+ignore: |
+  # CI caches, local mo-cicd output, tool binaries
+  .cache/
+  .mo-cicd-out/
+  bin/
