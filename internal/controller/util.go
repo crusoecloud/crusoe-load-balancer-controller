@@ -315,8 +315,8 @@ const crusoeUserAgent = "crusoe-external-load-balancer-controller/0.0.1"
 var apiHTTPClient *http.Client
 
 // GetLoadBalancerLookup returns the direct load balancer lookup handleCreate uses to adopt an
-// existing load balancer, until client-go is upgraded (CRUSOE-111359). Call it after
-// GetCrusoeClient, which binds the configuration it reads and builds the client it shares.
+// existing load balancer. Call it after GetCrusoeClient, which binds the configuration it
+// reads and builds the client it shares.
 func GetLoadBalancerLookup() *crusoe.LoadBalancerLookup {
 	httpClient := apiHTTPClient
 	if httpClient == nil {
